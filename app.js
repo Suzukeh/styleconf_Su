@@ -18,6 +18,7 @@ const fileInput = document.getElementById("fileInput");
 const loadRepoBtn = document.getElementById("loadRepoBtn");
 const undoBtn = document.getElementById("undoBtn");
 const redoBtn = document.getElementById("redoBtn");
+const historyBtn = document.getElementById("historyBtn");
 const helpBtn = document.getElementById("helpBtn");
 const helpDialog = document.getElementById("helpDialog");
 const helpContent = document.getElementById("helpContent");
@@ -30,6 +31,9 @@ const saveConfirmTitle = document.getElementById("saveConfirmTitle");
 const saveConfirmContent = document.getElementById("saveConfirmContent");
 const saveConfirmCancelBtn = document.getElementById("saveConfirmCancelBtn");
 const saveConfirmOkBtn = document.getElementById("saveConfirmOkBtn");
+const historyDialog = document.getElementById("historyDialog");
+const historyContent = document.getElementById("historyContent");
+const historyCloseBtn = document.getElementById("historyCloseBtn");
 const mergeDialog = document.getElementById("mergeDialog");
 const mergeDialogTitle = document.getElementById("mergeDialogTitle");
 const mergeList = document.getElementById("mergeList");
@@ -45,6 +49,8 @@ const downloadBtn = document.getElementById("downloadBtn");
 let state = null;
 let textSyncTimer = null;
 let historyCommitTimer = null;
+let uiRenderTimer = null;
+let lastUiRenderAt = 0;
 let historyStack = [];
 let historyIndex = -1;
 let editorJumpHighlightTimer = null;
@@ -58,6 +64,12 @@ let oldFileName = "";
 let newLineRefs = [];
 let mergeCandidates = [];
 const maxHistorySize = 300;
+const colorInputThrottleMs = 80;
+const historyUpdateDelayMs = 1000;
+const fieldInputThrottleMs = 80;
+const fieldHistoryDebounceMs = historyUpdateDelayMs;
+const colorHistoryDebounceMs = historyUpdateDelayMs;
+const uiRenderThrottleMs = 80;
 
 function setStatus(message, isError = false) {
     statusEl.textContent = message;
@@ -934,6 +946,108 @@ function updateUndoRedoButtons() {
     redoBtn.disabled = historyIndex >= historyStack.length - 1;
 }
 
+function summarizeHistoryDiff(previousText, currentText) {
+    if (previousText === currentText)
+    {
+        return {
+            changedLineCount: 0,
+            firstChangedLine: 0,
+            beforePreview: "",
+            afterPreview: ""
+        };
+    }
+
+    const beforeLines = previousText.replace(/\r\n/g, "\n").split("\n");
+    const afterLines = currentText.replace(/\r\n/g, "\n").split("\n");
+    const maxLen = Math.max(beforeLines.length, afterLines.length);
+    let changedLineCount = 0;
+    let firstChangedLine = 0;
+
+    for (let i = 0; i < maxLen; i += 1)
+    {
+        const beforeLine = beforeLines[i] ?? "";
+        const afterLine = afterLines[i] ?? "";
+        if (beforeLine === afterLine)
+        {
+            continue;
+        }
+
+        changedLineCount += 1;
+        if (firstChangedLine === 0)
+        {
+            firstChangedLine = i + 1;
+        }
+    }
+
+    const firstIndex = Math.max(0, firstChangedLine - 1);
+    const truncate = (text) => {
+        if (text.length <= 80)
+        {
+            return text;
+        }
+        return `${text.slice(0, 77)}...`;
+    };
+
+    return {
+        changedLineCount,
+        firstChangedLine,
+        beforePreview: truncate(beforeLines[firstIndex] ?? ""),
+        afterPreview: truncate(afterLines[firstIndex] ?? "")
+    };
+}
+
+function jumpToHistory(index) {
+    if (index < 0 || index >= historyStack.length)
+    {
+        return;
+    }
+
+    historyIndex = index;
+    applySnapshot(historyStack[historyIndex]);
+    updateUndoRedoButtons();
+    updateHistoryView();
+}
+
+function updateHistoryView() {
+    if (!historyContent)
+    {
+        return;
+    }
+
+    if (historyStack.length === 0)
+    {
+        historyContent.innerHTML = "<div class=\"history-empty\">No history.</div>";
+        return;
+    }
+
+    const rows = historyStack.map((snapshot, index) => {
+        const marker = index === historyIndex ? "Current" : "";
+        const previousText = index > 0 ? historyStack[index - 1].text : "";
+        const diff = summarizeHistoryDiff(previousText, snapshot.text);
+        const summary = index === 0
+            ? "Initial snapshot"
+            : `First change: line ${diff.firstChangedLine || "-"}`;
+        const preview = index === 0
+            ? ""
+            : `- ${escapeHtml(diff.beforePreview)}\n+ ${escapeHtml(diff.afterPreview)}`;
+
+        return `
+<button type="button" class="history-item${index === historyIndex ? " current" : ""}" data-history-index="${index}">
+  <div class="history-item-head">
+    <span class="history-item-title">#${index + 1} ${marker}</span>
+  </div>
+  <div class="history-item-summary">${escapeHtml(summary)}${preview ? `\n${preview}` : ""}</div>
+</button>`;
+    });
+
+    historyContent.innerHTML = rows.join("");
+}
+
+function openHistoryDialog() {
+    updateHistoryView();
+    historyDialog.showModal();
+}
+
 function createSnapshot() {
     return {
         text: newText.value,
@@ -951,6 +1065,7 @@ function pushHistorySnapshot(snapshot) {
             current.selectionStart = snapshot.selectionStart;
             current.selectionEnd = snapshot.selectionEnd;
             updateUndoRedoButtons();
+            updateHistoryView();
             return;
         }
     }
@@ -967,13 +1082,14 @@ function pushHistorySnapshot(snapshot) {
     }
     historyIndex = historyStack.length - 1;
     updateUndoRedoButtons();
+    updateHistoryView();
 }
 
 function scheduleHistoryCommit() {
     clearTimeout(historyCommitTimer);
     historyCommitTimer = setTimeout(() => {
         pushHistorySnapshot(createSnapshot());
-    }, 160);
+    }, historyUpdateDelayMs);
 }
 
 function applySnapshot(snapshot) {
@@ -993,6 +1109,7 @@ function performUndo() {
     historyIndex -= 1;
     applySnapshot(historyStack[historyIndex]);
     updateUndoRedoButtons();
+    updateHistoryView();
 }
 
 function performRedo() {
@@ -1003,6 +1120,7 @@ function performRedo() {
     historyIndex += 1;
     applySnapshot(historyStack[historyIndex]);
     updateUndoRedoButtons();
+    updateHistoryView();
 }
 
 function resetHistoryWithCurrentState() {
@@ -1654,7 +1772,9 @@ function getFieldTitle(item) {
     return item.key;
 }
 
-function updateSourceTextFromState(changedItem = null) {
+function updateSourceTextFromState(changedItem = null, options = {}) {
+    const { skipHistory = false } = options;
+
     if (!state)
     {
         return;
@@ -1685,7 +1805,71 @@ function updateSourceTextFromState(changedItem = null) {
     }
 
     updateLineNumbers();
-    pushHistorySnapshot(createSnapshot());
+    if (!skipHistory)
+    {
+        pushHistorySnapshot(createSnapshot());
+    }
+}
+
+function createRateLimitedItemUpdater(sectionName, item, field) {
+    let previewTimer = null;
+    let historyTimer = null;
+    let lastPreviewAt = 0;
+
+    const applyPreview = () => {
+        previewTimer = null;
+        lastPreviewAt = Date.now();
+        updateSourceTextFromState(item, { skipHistory: true });
+    };
+
+    const schedulePreview = () => {
+        const elapsed = Date.now() - lastPreviewAt;
+        const wait = Math.max(0, fieldInputThrottleMs - elapsed);
+
+        if (wait === 0 && !previewTimer)
+        {
+            applyPreview();
+            return;
+        }
+
+        if (previewTimer)
+        {
+            return;
+        }
+
+        previewTimer = setTimeout(() => {
+            applyPreview();
+        }, wait);
+    };
+
+    const scheduleHistoryCommit = () => {
+        clearTimeout(historyTimer);
+        historyTimer = setTimeout(() => {
+            historyTimer = null;
+            updateSourceTextFromState(item);
+        }, fieldHistoryDebounceMs);
+    };
+
+    const flush = () => {
+        if (previewTimer)
+        {
+            clearTimeout(previewTimer);
+            applyPreview();
+        }
+
+        clearTimeout(historyTimer);
+        historyTimer = null;
+        updateSourceTextFromState(item);
+    };
+
+    const onInput = (nextValue) => {
+        item.value = nextValue;
+        updateFieldEditedState(field, sectionName, item);
+        schedulePreview();
+        scheduleHistoryCommit();
+    };
+
+    return { onInput, flush };
 }
 
 function updateLineNumbers() {
@@ -1813,6 +1997,43 @@ function syncLineNumberScroll() {
     syncEditedLinesOverlayScroll();
 }
 
+function renderEditorInputViews() {
+    uiRenderTimer = null;
+    lastUiRenderAt = Date.now();
+    updateLineNumbers();
+    renderOldDiffView();
+}
+
+function scheduleEditorInputViewsRender() {
+    const elapsed = Date.now() - lastUiRenderAt;
+    const wait = Math.max(0, uiRenderThrottleMs - elapsed);
+
+    if (wait === 0 && !uiRenderTimer)
+    {
+        renderEditorInputViews();
+        return;
+    }
+
+    if (uiRenderTimer)
+    {
+        return;
+    }
+
+    uiRenderTimer = setTimeout(() => {
+        renderEditorInputViews();
+    }, wait);
+}
+
+function flushEditorInputViewsRender() {
+    if (!uiRenderTimer)
+    {
+        return;
+    }
+
+    clearTimeout(uiRenderTimer);
+    renderEditorInputViews();
+}
+
 function getNewLineNumberFromCaret() {
     const caret = newText.selectionStart ?? 0;
     return newText.value.slice(0, caret).split("\n").length;
@@ -1929,10 +2150,11 @@ function scrollNewTextToLine(lineNumber) {
     newText.focus();
     newText.setSelectionRange(caretIndex, caretIndex);
 
-    const before = text.slice(0, caretIndex);
-    const visualLine = before.split("\n").length;
     const lineHeight = parseFloat(getComputedStyle(newText).lineHeight) || 20;
-    newText.scrollTop = Math.max(0, (visualLine - 2) * lineHeight);
+    const targetLineTop = Math.max(0, (lineNumber - 1) * lineHeight);
+    const centeredTop = targetLineTop - (newText.clientHeight / 2) + (lineHeight / 2);
+    const maxScrollTop = Math.max(0, newText.scrollHeight - newText.clientHeight);
+    newText.scrollTop = Math.max(0, Math.min(centeredTop, maxScrollTop));
     syncLineNumberScroll();
     updateNewLineHighlight();
 }
@@ -1943,12 +2165,62 @@ function createColorEditor(sectionName, item, field) {
 
     const tokens = item.value.split(",").map((v) => v.trim()).filter(Boolean);
     const rowStates = [];
+    let colorPreviewTimer = null;
+    let colorHistoryTimer = null;
+    let lastColorPreviewAt = 0;
+
+    const applyColorPreview = () => {
+        colorPreviewTimer = null;
+        lastColorPreviewAt = Date.now();
+        updateSourceTextFromState(item, { skipHistory: true });
+    };
+
+    const scheduleColorPreview = () => {
+        const elapsed = Date.now() - lastColorPreviewAt;
+        const wait = Math.max(0, colorInputThrottleMs - elapsed);
+
+        if (wait === 0 && !colorPreviewTimer)
+        {
+            applyColorPreview();
+            return;
+        }
+
+        if (colorPreviewTimer)
+        {
+            return;
+        }
+
+        colorPreviewTimer = setTimeout(() => {
+            applyColorPreview();
+        }, wait);
+    };
+
+    const scheduleColorHistoryCommit = () => {
+        clearTimeout(colorHistoryTimer);
+        colorHistoryTimer = setTimeout(() => {
+            colorHistoryTimer = null;
+            updateSourceTextFromState(item);
+        }, colorHistoryDebounceMs);
+    };
+
+    const flushColorHistoryCommit = () => {
+        if (colorPreviewTimer)
+        {
+            clearTimeout(colorPreviewTimer);
+            applyColorPreview();
+        }
+
+        clearTimeout(colorHistoryTimer);
+        colorHistoryTimer = null;
+        updateSourceTextFromState(item);
+    };
 
     const syncItemValue = () => {
         const newTokens = rowStates.map((state) => state.token).filter(Boolean);
         item.value = newTokens.join(",");
-        updateSourceTextFromState(item);
         updateFieldEditedState(field, sectionName, item);
+        scheduleColorPreview();
+        scheduleColorHistoryCommit();
     };
 
     tokens.forEach((token) => {
@@ -1988,6 +2260,12 @@ function createColorEditor(sectionName, item, field) {
             refreshInputsFromToken();
             syncItemValue();
         });
+        colorInput.addEventListener("change", () => {
+            flushColorHistoryCommit();
+        });
+        colorInput.addEventListener("blur", () => {
+            flushColorHistoryCommit();
+        });
 
         textInput.addEventListener("input", () => {
             const converted = convertFormatToHexToken(textInput.value.trim(), colorInputFormat, rowState.token);
@@ -1998,6 +2276,12 @@ function createColorEditor(sectionName, item, field) {
             rowState.token = converted;
             refreshInputsFromToken();
             syncItemValue();
+        });
+        textInput.addEventListener("change", () => {
+            flushColorHistoryCommit();
+        });
+        textInput.addEventListener("blur", () => {
+            flushColorHistoryCommit();
         });
 
         row.appendChild(colorInput);
@@ -2033,11 +2317,16 @@ function createFieldEditor(sectionName, item, field) {
         const numberInput = document.createElement("input");
         numberInput.type = "number";
         numberInput.value = item.value;
+        const updater = createRateLimitedItemUpdater(sectionName, item, field);
 
         numberInput.addEventListener("input", () => {
-            item.value = numberInput.value;
-            updateSourceTextFromState(item);
-            updateFieldEditedState(field, sectionName, item);
+            updater.onInput(numberInput.value);
+        });
+        numberInput.addEventListener("change", () => {
+            updater.onInput(numberInput.value);
+        });
+        numberInput.addEventListener("blur", () => {
+            updater.flush();
         });
 
         return numberInput;
@@ -2046,11 +2335,16 @@ function createFieldEditor(sectionName, item, field) {
     const textInput = document.createElement("input");
     textInput.type = "text";
     textInput.value = item.value;
+    const updater = createRateLimitedItemUpdater(sectionName, item, field);
 
     textInput.addEventListener("input", () => {
-        item.value = textInput.value;
-        updateSourceTextFromState(item);
-        updateFieldEditedState(field, sectionName, item);
+        updater.onInput(textInput.value);
+    });
+    textInput.addEventListener("change", () => {
+        updater.flush();
+    });
+    textInput.addEventListener("blur", () => {
+        updater.flush();
     });
 
     return textInput;
@@ -2124,7 +2418,7 @@ function renderEditor(parsed) {
             lineBtn.dataset.originalText = `Line ${item.lineNumber}`;
             lineBtn.addEventListener("mouseenter", () => {
                 lineBtn.textContent = "Jump";
-                lineBtn.title = "New テキストの対応行へ移動します";
+                lineBtn.title = "New と Old の対応行へ移動します";
             });
             lineBtn.addEventListener("mouseleave", () => {
                 lineBtn.textContent = lineBtn.dataset.originalText;
@@ -2132,6 +2426,14 @@ function renderEditor(parsed) {
             });
             lineBtn.addEventListener("click", () => {
                 scrollNewTextToLine(item.lineNumber);
+
+                const itemSignature = buildItemSignature(section.name, item.key);
+                let oldRow = findOldRowBySignature(itemSignature, item.lineNumber);
+                if (!oldRow)
+                {
+                    oldRow = oldDiffView.querySelector(`.old-row[data-left-line="${item.lineNumber}"]`);
+                }
+                highlightOldRow(oldRow);
             });
 
             top.appendChild(title);
@@ -2482,6 +2784,36 @@ redoBtn.addEventListener("click", () => {
     performRedo();
 });
 
+historyBtn.addEventListener("click", () => {
+    openHistoryDialog();
+});
+
+historyContent.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element))
+    {
+        return;
+    }
+
+    const item = target.closest(".history-item");
+    if (!item)
+    {
+        return;
+    }
+
+    const index = Number(item.getAttribute("data-history-index") || "-1");
+    if (!Number.isInteger(index))
+    {
+        return;
+    }
+
+    jumpToHistory(index);
+});
+
+historyCloseBtn.addEventListener("click", () => {
+    historyDialog.close();
+});
+
 helpBtn.addEventListener("click", () => {
     showHelp();
 });
@@ -2555,13 +2887,16 @@ document.addEventListener("keydown", (event) => {
 });
 
 newText.addEventListener("input", () => {
-    updateLineNumbers();
-    renderOldDiffView();
+    scheduleEditorInputViewsRender();
     scheduleHistoryCommit();
     clearTimeout(textSyncTimer);
     textSyncTimer = setTimeout(() => {
         importFromText(newText.value, { keepSourceText: true });
     }, 120);
+});
+
+newText.addEventListener("blur", () => {
+    flushEditorInputViewsRender();
 });
 
 newText.addEventListener("scroll", () => {

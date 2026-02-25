@@ -25,6 +25,7 @@
                     <div class="history-actions">
                         <button id="undoBtn" type="button" title="直前の編集を取り消します (Ctrl+Z)">Undo</button>
                         <button id="redoBtn" type="button" title="取り消した編集をやり直します (Ctrl+Shift+Z / Ctrl+Y)">Redo</button>
+                        <button id="historyBtn" type="button" title="Show edit history">History</button>
                         <div class="color-format-group">
                             <label class="format-label" for="globalColorFormatSelect" title="色の表示形式を切り替えます">Color format</label>
                             <select id="globalColorFormatSelect">
@@ -100,6 +101,16 @@
                 </div>
             </div>
             <div id="saveConfirmContent" class="save-confirm-content"></div>
+        </dialog>
+
+        <dialog id="historyDialog" class="help-dialog">
+            <div class="help-header">
+                <strong>History</strong>
+                <div class="help-lang">
+                    <button id="historyCloseBtn" type="button" title="履歴を閉じます">Close</button>
+                </div>
+            </div>
+            <div id="historyContent" class="history-content"></div>
         </dialog>
 
         <dialog id="mergeDialog" class="help-dialog">

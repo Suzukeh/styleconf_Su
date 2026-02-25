@@ -142,6 +142,56 @@ button:disabled {
     font: 13px/1.45 Consolas, "Cascadia Code", monospace;
 }
 
+.history-content {
+    max-height: calc(80vh - 90px);
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.history-item {
+    width: 100%;
+    text-align: left;
+    border: 1px solid #555;
+    background: #1d1d1d;
+    border-radius: 6px;
+    padding: 8px;
+    color: #f0f0f0;
+    font: 12px/1.45 Consolas, "Cascadia Code", monospace;
+}
+
+.history-item.current {
+    border-color: #8aa8ff;
+    box-shadow: inset 0 0 0 1px #486bb8;
+}
+
+.history-item-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.history-item-title {
+    font-weight: 700;
+}
+
+.history-item-meta {
+    color: #c8c8c8;
+}
+
+.history-item-summary {
+    color: #e0e0e0;
+    white-space: pre-wrap;
+}
+
+.history-empty {
+    color: #bdbdbd;
+    font-size: 13px;
+}
+
 .help-repo-link {
     display: inline-block;
     margin-top: 10px;

@@ -1,14 +1,14 @@
-const sourceText = document.getElementById("sourceText");
+const newText = document.getElementById("sourceText");
 const lineNumbers = document.getElementById("lineNumbers");
 const beforeValues = document.getElementById("beforeValues");
 const editedLinesOverlay = document.getElementById("editedLinesOverlay");
-const currentLineHighlight = document.getElementById("currentLineHighlight");
+const newLineHighlight = document.getElementById("currentLineHighlight");
 const sectionsRoot = document.getElementById("sections");
-const compareFileInput = document.getElementById("compareFileInput");
+const oldFileInput = document.getElementById("oldFileInput");
 const mergeBtn = document.getElementById("mergeBtn");
-const clearCompareBtn = document.getElementById("clearCompareBtn");
-const compareStatus = document.getElementById("compareStatus");
-const compareDiffView = document.getElementById("compareDiffView");
+const clearOldBtn = document.getElementById("clearOldBtn");
+const oldStatus = document.getElementById("oldStatus");
+const oldDiffView = document.getElementById("oldDiffView");
 const panes = document.querySelector(".panes");
 const paneDivider = document.getElementById("paneDivider");
 const rightSplit = document.getElementById("rightSplit");
@@ -34,7 +34,7 @@ const mergeDialog = document.getElementById("mergeDialog");
 const mergeDialogTitle = document.getElementById("mergeDialogTitle");
 const mergeList = document.getElementById("mergeList");
 const mergeAllTextBtn = document.getElementById("mergeAllTextBtn");
-const mergeAllCompareBtn = document.getElementById("mergeAllCompareBtn");
+const mergeAllOldBtn = document.getElementById("mergeAllOldBtn");
 const mergeCancelBtn = document.getElementById("mergeCancelBtn");
 const mergeApplyBtn = document.getElementById("mergeApplyBtn");
 const mergeUseOtherWhenMissing = document.getElementById("mergeUseOtherWhenMissing");
@@ -53,9 +53,9 @@ let baselineText = "";
 let baselineValueMap = new Map();
 let colorInputFormat = "hex";
 let colorRowStates = [];
-let compareText = "";
-let compareFileName = "";
-let sourceLineRefs = [];
+let oldText = "";
+let oldFileName = "";
+let newLineRefs = [];
 let mergeCandidates = [];
 const maxHistorySize = 300;
 
@@ -64,16 +64,16 @@ function setStatus(message, isError = false) {
     statusEl.style.color = isError ? "#ff9f9f" : "#d0d0d0";
 }
 
-function setCompareStatus(message, isError = false) {
-    compareStatus.textContent = message;
-    compareStatus.style.color = isError ? "#ff9f9f" : "#d0d0d0";
+function setOldStatus(message, isError = false) {
+    oldStatus.textContent = message;
+    oldStatus.style.color = isError ? "#ff9f9f" : "#d0d0d0";
 }
 
-function updateCompareLayoutState() {
-    const hasCompare = Boolean(compareText);
-    rightSplit.classList.toggle("compare-hidden", !hasCompare);
-    mergeBtn.disabled = !hasCompare;
-    clearCompareBtn.disabled = !hasCompare;
+function updateOldLayoutState() {
+    const hasOld = Boolean(oldText);
+    rightSplit.classList.toggle("old-hidden", !hasOld);
+    mergeBtn.disabled = !hasOld;
+    clearOldBtn.disabled = !hasOld;
 }
 
 function buildParsedItemMap(parsed) {
@@ -148,7 +148,7 @@ function removeEmptySections(parsed) {
     parsed.sections = parsed.sections.filter((section) => section.items.length > 0);
 }
 
-function applyValueOnlyToCurrentText(originalText, beforeParsed, afterParsed) {
+function applyValueOnlyToNewText(originalText, beforeParsed, afterParsed) {
     const beforeMap = buildParsedItemMapWithLine(beforeParsed);
     const afterMap = buildParsedItemMap(afterParsed);
     const signatures = new Set([...beforeMap.keys(), ...afterMap.keys()]);
@@ -177,10 +177,10 @@ function applyValueOnlyToCurrentText(originalText, beforeParsed, afterParsed) {
             return;
         }
 
-        const currentLine = lines[lineIndex] ?? "";
+        const newLine = lines[lineIndex] ?? "";
         const escapedKey = escapeRegExp(beforeItem.key);
         const linePattern = new RegExp(`^(\\s*${escapedKey}\\s*=\\s*)(.*?)(\\s*)$`);
-        const matched = currentLine.match(linePattern);
+        const matched = newLine.match(linePattern);
         if (!matched)
         {
             requiresStructuralRewrite = true;
@@ -230,46 +230,46 @@ function formatValueLikeEditor(value) {
 }
 
 function buildMergeDescription(candidate) {
-    const sourceDescription = candidate.source ? candidate.source.comments.join("\n").trim() : "";
-    const compareDescription = candidate.compare ? candidate.compare.comments.join("\n").trim() : "";
+    const newDescription = candidate.newItem ? candidate.newItem.comments.join("\n").trim() : "";
+    const oldDescription = candidate.oldItem ? candidate.oldItem.comments.join("\n").trim() : "";
 
-    if (sourceDescription && compareDescription)
+    if (newDescription && oldDescription)
     {
-        if (sourceDescription === compareDescription)
+        if (newDescription === oldDescription)
         {
-            return sourceDescription;
+            return newDescription;
         }
-        return `Current: ${sourceDescription}\nCompare: ${compareDescription}`;
+        return `New: ${newDescription}\nOld: ${oldDescription}`;
     }
 
-    return sourceDescription || compareDescription;
+    return newDescription || oldDescription;
 }
 
-function buildMergeCandidates(sourceParsed, compareParsed) {
-    const sourceMap = buildParsedItemMap(sourceParsed);
-    const compareMap = buildParsedItemMap(compareParsed);
-    const signatures = new Set([...sourceMap.keys(), ...compareMap.keys()]);
+function buildMergeCandidates(newParsed, oldParsed) {
+    const newMap = buildParsedItemMap(newParsed);
+    const oldMap = buildParsedItemMap(oldParsed);
+    const signatures = new Set([...newMap.keys(), ...oldMap.keys()]);
     const candidates = [];
 
     signatures.forEach((signature) => {
-        const sourceItem = sourceMap.get(signature) || null;
-        const compareItem = compareMap.get(signature) || null;
-        const sourceValue = sourceItem ? sourceItem.value : "";
-        const compareValue = compareItem ? compareItem.value : "";
+        const newItem = newMap.get(signature) || null;
+        const oldItem = oldMap.get(signature) || null;
+        const newValue = newItem ? newItem.value : "";
+        const oldValue = oldItem ? oldItem.value : "";
 
-        if (sourceItem && compareItem && sourceValue === compareValue)
+        if (newItem && oldItem && newValue === oldValue)
         {
             return;
         }
 
-        const info = sourceItem || compareItem;
+        const info = newItem || oldItem;
         candidates.push({
             signature,
             sectionName: info.sectionName,
             key: info.key,
-            source: sourceItem,
-            compare: compareItem,
-            preferText: Boolean(sourceItem)
+            newItem,
+            oldItem,
+            preferNew: Boolean(newItem)
         });
     });
 
@@ -293,13 +293,13 @@ function renderMergeDialogList() {
 
     mergeApplyBtn.disabled = false;
     const rows = mergeCandidates.map((candidate, index) => {
-        const sourceRawValue = candidate.source ? candidate.source.value : "";
-        const compareRawValue = candidate.compare ? candidate.compare.value : "";
-        const sourceValue = candidate.source ? formatValueLikeEditor(sourceRawValue) : "(missing)";
-        const compareValue = candidate.compare ? formatValueLikeEditor(compareRawValue) : "(missing)";
-        const sourceColors = candidate.source ? buildColorChipHtml(extractHexColorTokens(sourceRawValue)) : "";
-        const compareColors = candidate.compare ? buildColorChipHtml(extractHexColorTokens(compareRawValue)) : "";
-        const checked = candidate.preferText ? "" : " checked";
+        const newRawValue = candidate.newItem ? candidate.newItem.value : "";
+        const oldRawValue = candidate.oldItem ? candidate.oldItem.value : "";
+        const newValue = candidate.newItem ? formatValueLikeEditor(newRawValue) : "(missing)";
+        const oldValue = candidate.oldItem ? formatValueLikeEditor(oldRawValue) : "(missing)";
+        const newColors = candidate.newItem ? buildColorChipHtml(extractHexColorTokens(newRawValue)) : "";
+        const oldColors = candidate.oldItem ? buildColorChipHtml(extractHexColorTokens(oldRawValue)) : "";
+        const checked = candidate.preferNew ? "" : " checked";
         const description = buildMergeDescription(candidate);
         const descriptionHtml = description
             ? `<p class="merge-item-desc">${escapeHtml(description)}</p>`
@@ -310,14 +310,14 @@ function renderMergeDialogList() {
   <div class="merge-row-head">
     <span class="merge-item-name">[${escapeHtml(candidate.sectionName)}] ${escapeHtml(candidate.key)}</span>
     <label class="merge-choice-label">
-      <input type="checkbox" data-merge-index="${index}"${checked}>
-            Use Compare
+    <input type="checkbox" data-merge-index="${index}"${checked}>
+        Use Old
     </label>
   </div>
     ${descriptionHtml}
   <div class="merge-row-values">
-                <div class="merge-value"><span class="merge-value-title">Current</span>${escapeHtml(sourceValue)}<span class="merge-value-colors">${sourceColors}</span></div>
-        <div class="merge-value"><span class="merge-value-title">Compare</span>${escapeHtml(compareValue)}<span class="merge-value-colors">${compareColors}</span></div>
+                                <div class="merge-value"><span class="merge-value-title">New</span>${escapeHtml(newValue)}<span class="merge-value-colors">${newColors}</span></div>
+                        <div class="merge-value"><span class="merge-value-title">Old</span>${escapeHtml(oldValue)}<span class="merge-value-colors">${oldColors}</span></div>
   </div>
 </div>`;
     });
@@ -325,34 +325,34 @@ function renderMergeDialogList() {
     mergeList.innerHTML = rows.join("");
 }
 
-function setAllMergeChoices(preferText) {
+function setAllMergeChoices(preferNew) {
     mergeCandidates.forEach((candidate) => {
-        candidate.preferText = preferText;
+        candidate.preferNew = preferNew;
     });
 
     mergeList.querySelectorAll("input[type=checkbox][data-merge-index]").forEach((checkbox) => {
-        checkbox.checked = !preferText;
+        checkbox.checked = !preferNew;
     });
 }
 
 function openMergeDialog() {
-    if (!compareText)
+    if (!oldText)
     {
-        setStatus("Open a compare style.conf first.", true);
+        setStatus("Open an old style.conf first.", true);
         return;
     }
 
     try
     {
-        const sourceParsed = parseStyleConf(sourceText.value);
-        const compareParsed = parseStyleConf(compareText);
+        const newParsed = parseStyleConf(newText.value);
+        const oldParsed = parseStyleConf(oldText);
 
-        if (sourceParsed.sections.length === 0 || compareParsed.sections.length === 0)
+        if (newParsed.sections.length === 0 || oldParsed.sections.length === 0)
         {
             throw new Error("No section found. Please check style.conf format.");
         }
 
-        mergeCandidates = buildMergeCandidates(sourceParsed, compareParsed);
+        mergeCandidates = buildMergeCandidates(newParsed, oldParsed);
         mergeDialogTitle.textContent = `Merge confirmation (${mergeCandidates.length} items)`;
         renderMergeDialogList();
         mergeDialog.showModal();
@@ -363,47 +363,47 @@ function openMergeDialog() {
 }
 
 function applyMergeSelections() {
-    if (!compareText)
+    if (!oldText)
     {
         mergeDialog.close();
-        setStatus("Open a compare style.conf first.", true);
+        setStatus("Open an old style.conf first.", true);
         return;
     }
 
     try
     {
-        const sourceParsed = parseStyleConf(sourceText.value);
-        const sourceParsedBeforeMerge = parseStyleConf(sourceText.value);
+        const newParsed = parseStyleConf(newText.value);
+        const newParsedBeforeMerge = parseStyleConf(newText.value);
         const useOtherWhenMissing = mergeUseOtherWhenMissing.checked;
 
         mergeCandidates.forEach((candidate) => {
-            const selectedItem = candidate.preferText ? candidate.source : candidate.compare;
-            const otherItem = candidate.preferText ? candidate.compare : candidate.source;
+            const selectedItem = candidate.preferNew ? candidate.newItem : candidate.oldItem;
+            const otherItem = candidate.preferNew ? candidate.oldItem : candidate.newItem;
 
             if (selectedItem)
             {
-                setParsedItem(sourceParsed, candidate.sectionName, candidate.key, selectedItem.value, selectedItem.comments);
+                setParsedItem(newParsed, candidate.sectionName, candidate.key, selectedItem.value, selectedItem.comments);
                 return;
             }
 
             if (useOtherWhenMissing && otherItem)
             {
-                setParsedItem(sourceParsed, candidate.sectionName, candidate.key, otherItem.value, otherItem.comments);
+                setParsedItem(newParsed, candidate.sectionName, candidate.key, otherItem.value, otherItem.comments);
             }
         });
 
-        removeEmptySections(sourceParsed);
+        removeEmptySections(newParsed);
 
-        const mergedCurrent = applyValueOnlyToCurrentText(sourceText.value, sourceParsedBeforeMerge, sourceParsed);
-        const mergedSourceText = mergedCurrent.text;
-        sourceText.value = mergedSourceText;
-        importFromText(mergedSourceText, { keepSourceText: true });
+        const mergedNew = applyValueOnlyToNewText(newText.value, newParsedBeforeMerge, newParsed);
+        const mergedNewText = mergedNew.text;
+        newText.value = mergedNewText;
+        importFromText(mergedNewText, { keepSourceText: true });
         pushHistorySnapshot(createSnapshot());
 
         mergeDialog.close();
-        setStatus(mergedCurrent.usedStructuralRewrite
+        setStatus(mergedNew.usedStructuralRewrite
             ? "Merge applied (includes structural changes)."
-            : "Merge applied (value-only update for Current)."
+            : "Merge applied (value-only update for New)."
         );
     } catch (error)
     {
@@ -411,7 +411,7 @@ function applyMergeSelections() {
     }
 }
 
-function escapeCompareLine(text) {
+function escapeOldDiffLine(text) {
     return text
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
@@ -491,20 +491,20 @@ function buildLineRefs(lines) {
     return refs;
 }
 
-function renderCompareDiffView() {
-    updateCompareLayoutState();
+function renderOldDiffView() {
+    updateOldLayoutState();
 
-    if (!compareText)
+    if (!oldText)
     {
-        compareDiffView.innerHTML = "<div class=\"compare-empty\">Open Compare style.conf to show diff.</div>";
+        oldDiffView.innerHTML = "<div class=\"old-empty\">Open Old style.conf to show diff.</div>";
         return;
     }
 
-    const leftLines = sourceText.value.replace(/\r\n/g, "\n").split("\n");
-    const rightLines = compareText.replace(/\r\n/g, "\n").split("\n");
+    const leftLines = newText.value.replace(/\r\n/g, "\n").split("\n");
+    const rightLines = oldText.replace(/\r\n/g, "\n").split("\n");
     const leftRefs = buildLineRefs(leftLines);
     const rightRefs = buildLineRefs(rightLines);
-    sourceLineRefs = leftRefs;
+    newLineRefs = leftRefs;
     const diffRows = buildLcsDiffRows(leftLines, rightLines, leftRefs, rightRefs);
     const rows = [];
 
@@ -516,15 +516,15 @@ function renderCompareDiffView() {
         const originalLabelAttr = ` data-original-label=\"${escapeHtml(lineNumberLabel)}\"`;
 
         rows.push(
-            `<div class="compare-row ${row.rowClass}"${leftAttr}${rightAttr}${itemSignatureAttr} title="${escapeHtml(row.title)}">`
-            + `<span class="compare-line-number"${originalLabelAttr}>${lineNumberLabel}</span>`
-            + `<span class="compare-marker">${row.marker}</span>`
-            + `<span class="compare-line-text">${escapeCompareLine(row.rightText)}</span>`
+            `<div class="old-row ${row.rowClass}"${leftAttr}${rightAttr}${itemSignatureAttr} title="${escapeHtml(row.title)}">`
+            + `<span class="old-line-number"${originalLabelAttr}>${lineNumberLabel}</span>`
+            + `<span class="old-marker">${row.marker}</span>`
+            + `<span class="old-line-text">${escapeOldDiffLine(row.rightText)}</span>`
             + `</div>`
         );
     });
 
-    compareDiffView.innerHTML = rows.join("");
+    oldDiffView.innerHTML = rows.join("");
 }
 
 function buildLcsDiffRows(leftLines, rightLines, leftRefs, rightRefs) {
@@ -550,7 +550,7 @@ function buildLcsDiffRows(leftLines, rightLines, leftRefs, rightRefs) {
             return {
                 rowClass: "added",
                 marker: "+",
-                title: "Only in compare file",
+                title: "Only in old file",
                 rightText: operation.rightText,
                 leftLineNumber: null,
                 rightLineNumber: operation.rightLineNumber,
@@ -608,13 +608,13 @@ function getClosestByLineDistance(candidates, targetLine, lineAccessor) {
     return best;
 }
 
-function findCompareRowBySignature(itemSignature, anchorLeftLine) {
+function findOldRowBySignature(itemSignature, anchorLeftLine) {
     if (!itemSignature)
     {
         return null;
     }
 
-    const allRows = Array.from(compareDiffView.querySelectorAll(".compare-row"));
+    const allRows = Array.from(oldDiffView.querySelectorAll(".old-row"));
     const keyRows = allRows.filter((row) => row.dataset.itemSignature === itemSignature);
     return getClosestByLineDistance(
         keyRows,
@@ -623,16 +623,16 @@ function findCompareRowBySignature(itemSignature, anchorLeftLine) {
     );
 }
 
-function findSourceLineBySignature(itemSignature, anchorLineNumber) {
-    if (!itemSignature || sourceLineRefs.length === 0)
+function findNewLineBySignature(itemSignature, anchorLineNumber) {
+    if (!itemSignature || newLineRefs.length === 0)
     {
         return 0;
     }
 
     const candidates = [];
-    for (let index = 0; index < sourceLineRefs.length; index += 1)
+    for (let index = 0; index < newLineRefs.length; index += 1)
     {
-        if (sourceLineRefs[index].signature === itemSignature)
+        if (newLineRefs[index].signature === itemSignature)
         {
             candidates.push(index + 1);
         }
@@ -664,13 +664,13 @@ function findSourceLineBySignature(itemSignature, anchorLineNumber) {
     return bestLine;
 }
 
-function highlightCompareRow(row) {
+function highlightOldRow(row) {
     if (!row)
     {
         return;
     }
     row.scrollIntoView({ block: "center", behavior: "smooth" });
-    compareDiffView.querySelectorAll(".compare-row.focus").forEach((focusRow) => {
+    oldDiffView.querySelectorAll(".old-row.focus").forEach((focusRow) => {
         focusRow.classList.remove("focus");
     });
     row.classList.add("focus");
@@ -902,7 +902,7 @@ function initializeRightPaneResizer() {
     });
 }
 
-async function loadCompareStyleConf(file) {
+async function loadOldStyleConf(file) {
     if (!file)
     {
         return;
@@ -911,22 +911,22 @@ async function loadCompareStyleConf(file) {
     try
     {
         const text = await file.text();
-        compareText = text;
-        compareFileName = file.name || "style.conf";
-        setCompareStatus(`Compare file: ${compareFileName}`);
-        renderCompareDiffView();
+        oldText = text;
+        oldFileName = file.name || "style.conf";
+        setOldStatus(`Old file: ${oldFileName}`);
+        renderOldDiffView();
     } catch (error)
     {
-        setCompareStatus(`Failed to read compare file: ${error.message}`, true);
+        setOldStatus(`Failed to read old file: ${error.message}`, true);
     }
 }
 
-function clearCompareStyleConf() {
-    compareText = "";
-    compareFileName = "";
-    compareFileInput.value = "";
-    setCompareStatus("No comparison file loaded.");
-    renderCompareDiffView();
+function clearOldStyleConf() {
+    oldText = "";
+    oldFileName = "";
+    oldFileInput.value = "";
+    setOldStatus("No old file loaded.");
+    renderOldDiffView();
 }
 
 function updateUndoRedoButtons() {
@@ -936,9 +936,9 @@ function updateUndoRedoButtons() {
 
 function createSnapshot() {
     return {
-        text: sourceText.value,
-        selectionStart: sourceText.selectionStart ?? 0,
-        selectionEnd: sourceText.selectionEnd ?? 0
+        text: newText.value,
+        selectionStart: newText.selectionStart ?? 0,
+        selectionEnd: newText.selectionEnd ?? 0
     };
 }
 
@@ -977,12 +977,12 @@ function scheduleHistoryCommit() {
 }
 
 function applySnapshot(snapshot) {
-    sourceText.value = snapshot.text;
-    const start = Math.min(snapshot.selectionStart, sourceText.value.length);
-    const end = Math.min(snapshot.selectionEnd, sourceText.value.length);
-    sourceText.setSelectionRange(start, end);
-    importFromText(sourceText.value, { keepSourceText: true });
-    updateCurrentLineHighlight();
+    newText.value = snapshot.text;
+    const start = Math.min(snapshot.selectionStart, newText.value.length);
+    const end = Math.min(snapshot.selectionEnd, newText.value.length);
+    newText.setSelectionRange(start, end);
+    importFromText(newText.value, { keepSourceText: true });
+    updateNewLineHighlight();
 }
 
 function performUndo() {
@@ -1069,16 +1069,22 @@ function updateFieldEditedState(field, sectionName, item) {
     beforeValueEl.classList.remove("inactive");
 }
 
-function resetSourceLineToBaseline(lineNumber) {
+function resetNewLineToBaseline(lineNumber) {
     const lineIndex = lineNumber - 1;
     if (lineIndex < 0)
     {
         return;
     }
 
-    const lines = sourceText.value.replace(/\r\n/g, "\n").split("\n");
+    const lines = newText.value.replace(/\r\n/g, "\n").split("\n");
     const baseLines = baselineText.split("\n");
-    const baselineLineText = baseLines[lineIndex] ?? "";
+    const newToBaseMap = buildNewToBaselineLineMap(lines, baseLines);
+    const baselineLineIndex = newToBaseMap[lineIndex] ?? -1;
+    if (baselineLineIndex < 0)
+    {
+        return;
+    }
+    const baselineLineText = baseLines[baselineLineIndex] ?? "";
     const currentLineText = lines[lineIndex] ?? "";
     if (currentLineText === baselineLineText)
     {
@@ -1091,8 +1097,8 @@ function resetSourceLineToBaseline(lineNumber) {
     }
     lines[lineIndex] = baselineLineText;
 
-    sourceText.value = lines.join("\n");
-    importFromText(sourceText.value, { keepSourceText: true });
+    newText.value = lines.join("\n");
+    importFromText(newText.value, { keepSourceText: true });
     pushHistorySnapshot(createSnapshot());
 }
 
@@ -1105,7 +1111,7 @@ function resetEditorItemToBaseline(sectionName, item) {
 
     item.value = baselineValue;
     updateSourceTextFromState(item);
-    importFromText(sourceText.value, { keepSourceText: true });
+    importFromText(newText.value, { keepSourceText: true });
 }
 
 function showHelp() {
@@ -1118,43 +1124,43 @@ function updateHelpContent() {
     {
         helpContent.textContent =
             "styleconf_Su ヘルプ\n\n"
-            + "・Open (Ctrl+O): Current の style.conf を開きます\n"
-            + "・Save (Ctrl+S): Current を保存します\n"
+            + "・Open (Ctrl+O): New の style.conf を開きます\n"
+            + "・Save (Ctrl+S): New を保存します\n"
             + "・Load Repo style.conf: リポジトリの style.conf を読み込みます\n"
-            + "・Open Compare style.conf: 比較用ファイルを開きます\n"
+            + "・Open Old style.conf: 比較用ファイルを開きます\n"
             + "・Merge: マージ確認画面を開きます\n"
-            + "  - All Current / All Compare で一括選択\n"
-            + "  - 各項目のチェックで Current / Compare を個別選択\n"
-            + "・Clear Compare: 比較ファイルを解除します\n"
+            + "  - All New / All Old で一括選択\n"
+            + "  - 各項目のチェックで New / Old を個別選択\n"
+            + "・Clear Old: 比較ファイルを解除します\n"
             + "・Undo/Redo: Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y\n"
             + "・Color format: HEX / RGB / HSL の表示形式を切替\n"
-            + "・左行番号クリック: Compare と Editor の対応項目へジャンプ\n"
-            + "・Compare 行番号クリック: Current と Editor の対応項目へジャンプ\n"
+            + "・左行番号クリック: Old と Editor の対応項目へジャンプ\n"
+            + "・Old 行番号クリック: New と Editor の対応項目へジャンプ\n"
             + "・Editor の Before 値ホバーで Reset、クリックで編集前に戻す\n"
             + "・テキスト右側の Reset で行単位で編集前に戻す\n"
             + "・中央境界のドラッグでペイン幅調整\n"
-            + "・Compare を開くと Current / Compare file タイトルを表示";
+            + "・Old を開くと New / Old file タイトルを表示";
         helpRepoLink.textContent = "Repository: https://github.com/Suzukeh/styleconf_Su";
     } else
     {
         helpContent.textContent =
             "styleconf_Su Help\n\n"
-            + "- Open (Ctrl+O): Open style.conf into Current\n"
-            + "- Save (Ctrl+S): Save Current\n"
+            + "- Open (Ctrl+O): Open style.conf into New\n"
+            + "- Save (Ctrl+S): Save New\n"
             + "- Load Repo style.conf: Load repository style.conf\n"
-            + "- Open Compare style.conf: Open comparison file\n"
+            + "- Open Old style.conf: Open comparison file\n"
             + "- Merge: Open merge confirmation dialog\n"
-            + "  - All Current / All Compare for bulk selection\n"
-            + "  - Per-item checkbox to choose Current vs Compare\n"
-            + "- Clear Compare: Remove comparison file\n"
+            + "  - All New / All Old for bulk selection\n"
+            + "  - Per-item checkbox to choose New vs Old\n"
+            + "- Clear Old: Remove comparison file\n"
             + "- Undo/Redo: Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y\n"
             + "- Color format: Switch HEX / RGB / HSL display\n"
-            + "- Left line number click: Jump to matched Compare and Editor item\n"
-            + "- Compare line number click: Jump to matched Current and Editor item\n"
+            + "- Left line number click: Jump to matched Old and Editor item\n"
+            + "- Old line number click: Jump to matched New and Editor item\n"
             + "- Hover Before value in Editor to show Reset and restore\n"
-            + "- Use right-side Reset to restore Current line\n"
+            + "- Use right-side Reset to restore New line\n"
             + "- Drag pane dividers to resize layout\n"
-            + "- Current / Compare file titles are shown in compare mode";
+            + "- New / Old file titles are shown in Old diff mode";
         helpRepoLink.textContent = "Repository: https://github.com/Suzukeh/styleconf_Su";
     }
 
@@ -1174,27 +1180,123 @@ function escapeHtml(text) {
 }
 
 function getChangedLines() {
-    const currentLines = sourceText.value.replace(/\r\n/g, "\n").split("\n");
+    const currentLines = newText.value.replace(/\r\n/g, "\n").split("\n");
     const baseLines = baselineText.split("\n");
-    const maxLineCount = Math.max(currentLines.length, baseLines.length);
+    const newToBaseMap = buildNewToBaselineLineMap(currentLines, baseLines);
     const changed = [];
+    const usedBaselineIndexes = new Set();
 
-    for (let index = 0; index < maxLineCount; index += 1)
+    const resolveLineNumberForBaseline = (baselineIndex) => {
+        for (let currentIndex = 0; currentIndex < newToBaseMap.length; currentIndex += 1)
+        {
+            if (newToBaseMap[currentIndex] > baselineIndex)
+            {
+                return currentIndex + 1;
+            }
+        }
+        return currentLines.length + 1;
+    };
+
+    for (let currentIndex = 0; currentIndex < currentLines.length; currentIndex += 1)
     {
-        const before = baseLines[index] ?? "";
-        const after = currentLines[index] ?? "";
+        const baselineIndex = newToBaseMap[currentIndex] ?? -1;
+        if (baselineIndex >= 0)
+        {
+            usedBaselineIndexes.add(baselineIndex);
+        }
+
+        const before = baselineIndex >= 0 ? (baseLines[baselineIndex] ?? "") : "";
+        const after = currentLines[currentIndex] ?? "";
         if (before === after)
         {
             continue;
         }
         changed.push({
-            lineNumber: index + 1,
+            lineNumber: currentIndex + 1,
             before,
             after
         });
     }
 
+    for (let baselineIndex = 0; baselineIndex < baseLines.length; baselineIndex += 1)
+    {
+        if (usedBaselineIndexes.has(baselineIndex))
+        {
+            continue;
+        }
+
+        changed.push({
+            lineNumber: resolveLineNumberForBaseline(baselineIndex),
+            before: baseLines[baselineIndex] ?? "",
+            after: ""
+        });
+    }
+
+    changed.sort((a, b) => a.lineNumber - b.lineNumber);
+
     return changed;
+}
+
+function buildNewToBaselineLineMap(newLines, baseLines) {
+    const map = Array.from({ length: newLines.length }, () => -1);
+    const operations = buildLcsOperations(baseLines, newLines);
+    const merged = mergeReplaceOperations(operations);
+
+    merged.forEach((operation) => {
+        if (operation.type === "equal" || operation.type === "replace")
+        {
+            map[operation.rightLineNumber - 1] = operation.leftLineNumber - 1;
+            return;
+        }
+
+        if (operation.type === "insert")
+        {
+            map[operation.rightLineNumber - 1] = -1;
+        }
+    });
+
+    try
+    {
+        const newParsed = parseStyleConf(newLines.join("\n"));
+        const baselineParsed = parseStyleConf(baseLines.join("\n"));
+        const baselineItemMap = buildParsedItemMapWithLine(baselineParsed);
+
+        newParsed.sections.forEach((section) => {
+            section.items.forEach((item) => {
+                const signature = buildItemSignature(section.name, item.key);
+                const baselineItem = baselineItemMap.get(signature);
+                if (!baselineItem)
+                {
+                    return;
+                }
+
+                const newKeyIndex = (item.lineNumber || 0) - 1;
+                const baselineKeyIndex = (baselineItem.lineNumber || 0) - 1;
+                if (newKeyIndex >= 0 && newKeyIndex < map.length && baselineKeyIndex >= 0)
+                {
+                    map[newKeyIndex] = baselineKeyIndex;
+                }
+
+                const newCommentCount = item.comments.length;
+                const baselineCommentCount = baselineItem.comments.length;
+                const sharedCommentCount = Math.min(newCommentCount, baselineCommentCount);
+                for (let offset = 1; offset <= sharedCommentCount; offset += 1)
+                {
+                    const newCommentIndex = newKeyIndex - offset;
+                    const baselineCommentIndex = baselineKeyIndex - offset;
+                    if (newCommentIndex < 0 || newCommentIndex >= map.length || baselineCommentIndex < 0)
+                    {
+                        continue;
+                    }
+                    map[newCommentIndex] = baselineCommentIndex;
+                }
+            });
+        });
+    } catch (_error)
+    {
+    }
+
+    return map;
 }
 
 function parseStyleConf(text) {
@@ -1560,7 +1662,7 @@ function updateSourceTextFromState(changedItem = null) {
 
     if (changedItem)
     {
-        const lines = sourceText.value.replace(/\r\n/g, "\n").split("\n");
+        const lines = newText.value.replace(/\r\n/g, "\n").split("\n");
         const lineIndex = changedItem.lineNumber - 1;
         if (lineIndex >= 0 && lineIndex < lines.length)
         {
@@ -1575,11 +1677,11 @@ function updateSourceTextFromState(changedItem = null) {
             {
                 lines[lineIndex] = `${changedItem.key}=${changedItem.value}`;
             }
-            sourceText.value = lines.join("\n");
+            newText.value = lines.join("\n");
         }
     } else
     {
-        sourceText.value = serializeStyleConf(state);
+        newText.value = serializeStyleConf(state);
     }
 
     updateLineNumbers();
@@ -1587,10 +1689,11 @@ function updateSourceTextFromState(changedItem = null) {
 }
 
 function updateLineNumbers() {
-    const lineCount = Math.max(1, sourceText.value.split("\n").length);
-    const currentLines = sourceText.value.split("\n");
-    sourceLineRefs = buildLineRefs(currentLines);
+    const lineCount = Math.max(1, newText.value.split("\n").length);
+    const currentLines = newText.value.split("\n");
+    newLineRefs = buildLineRefs(currentLines);
     const baseLines = baselineText.split("\n");
+    const newToBaseMap = buildNewToBaselineLineMap(currentLines, baseLines);
     const fragment = document.createDocumentFragment();
     const beforeFragment = document.createDocumentFragment();
     for (let line = 1; line <= lineCount; line += 1)
@@ -1599,8 +1702,12 @@ function updateLineNumbers() {
         lineEl.className = "line-number";
         const lineIndex = line - 1;
         const currentLineText = currentLines[lineIndex] ?? "";
-        const baselineLineText = baseLines[lineIndex] ?? "";
-        const edited = currentLineText !== baselineLineText;
+        const isKeyLine = Boolean(newLineRefs[lineIndex]?.signature);
+        const baselineLineIndex = newToBaseMap[lineIndex] ?? -1;
+        const hasBaselineMatch = baselineLineIndex >= 0;
+        const baselineLineText = hasBaselineMatch ? (baseLines[baselineLineIndex] ?? "") : "";
+        const edited = hasBaselineMatch ? (currentLineText !== baselineLineText) : true;
+        const canReset = isKeyLine && hasBaselineMatch && edited;
         lineEl.classList.toggle("edited", edited);
         lineEl.textContent = String(line);
         lineEl.dataset.originalText = String(line);
@@ -1609,8 +1716,8 @@ function updateLineNumbers() {
         beforeLineEl.className = "before-line";
         const beforeTextEl = document.createElement("span");
         beforeTextEl.className = "before-line-text";
-        beforeTextEl.textContent = edited ? baselineLineText : "";
-        if (edited)
+        beforeTextEl.textContent = canReset ? baselineLineText : "";
+        if (canReset)
         {
             beforeTextEl.title = baselineLineText;
         }
@@ -1619,10 +1726,10 @@ function updateLineNumbers() {
         resetBtnEl.className = "reset-line-btn";
         resetBtnEl.textContent = "Reset";
         resetBtnEl.title = "この行を編集前の値に戻します";
-        resetBtnEl.hidden = !edited;
-        resetBtnEl.disabled = !edited;
+        resetBtnEl.hidden = !canReset;
+        resetBtnEl.disabled = !canReset;
         resetBtnEl.addEventListener("click", () => {
-            resetSourceLineToBaseline(line);
+            resetNewLineToBaseline(line);
         });
 
         beforeLineEl.appendChild(beforeTextEl);
@@ -1638,15 +1745,15 @@ function updateLineNumbers() {
             lineEl.title = "";
         });
         lineEl.addEventListener("click", () => {
-            const lineRef = sourceLineRefs[lineIndex] ?? { signature: "" };
+            const lineRef = newLineRefs[lineIndex] ?? { signature: "" };
             const itemSignature = lineRef.signature;
 
-            let compareRow = findCompareRowBySignature(itemSignature, line);
-            if (!compareRow)
+            let oldRow = findOldRowBySignature(itemSignature, line);
+            if (!oldRow)
             {
-                compareRow = compareDiffView.querySelector(`.compare-row[data-left-line=\"${line}\"]`);
+                oldRow = oldDiffView.querySelector(`.old-row[data-left-line=\"${line}\"]`);
             }
-            highlightCompareRow(compareRow);
+            highlightOldRow(oldRow);
 
             if (itemSignature)
             {
@@ -1662,14 +1769,15 @@ function updateLineNumbers() {
     beforeValues.replaceChildren(beforeFragment);
     updateEditedLineHighlights();
     syncLineNumberScroll();
-    updateCurrentLineHighlight();
+    updateNewLineHighlight();
 }
 
 function updateEditedLineHighlights() {
-    const currentLines = sourceText.value.split("\n");
+    const currentLines = newText.value.split("\n");
     const baseLines = baselineText.split("\n");
+    const newToBaseMap = buildNewToBaselineLineMap(currentLines, baseLines);
     const lineCount = Math.max(currentLines.length, baseLines.length, 1);
-    const style = getComputedStyle(sourceText);
+    const style = getComputedStyle(newText);
     const lineHeight = parseFloat(style.lineHeight) || 18;
     const paddingTop = parseFloat(style.paddingTop) || 0;
     const fragment = document.createDocumentFragment();
@@ -1677,7 +1785,8 @@ function updateEditedLineHighlights() {
     for (let lineIndex = 0; lineIndex < lineCount; lineIndex += 1)
     {
         const currentLineText = currentLines[lineIndex] ?? "";
-        const baselineLineText = baseLines[lineIndex] ?? "";
+        const baselineLineIndex = newToBaseMap[lineIndex] ?? -1;
+        const baselineLineText = baselineLineIndex >= 0 ? (baseLines[baselineLineIndex] ?? "") : "";
         if (currentLineText === baselineLineText)
         {
             continue;
@@ -1695,29 +1804,29 @@ function updateEditedLineHighlights() {
 }
 
 function syncEditedLinesOverlayScroll() {
-    editedLinesOverlay.style.transform = `translateY(${-sourceText.scrollTop}px)`;
+    editedLinesOverlay.style.transform = `translateY(${-newText.scrollTop}px)`;
 }
 
 function syncLineNumberScroll() {
-    lineNumbers.scrollTop = sourceText.scrollTop;
-    beforeValues.scrollTop = sourceText.scrollTop;
+    lineNumbers.scrollTop = newText.scrollTop;
+    beforeValues.scrollTop = newText.scrollTop;
     syncEditedLinesOverlayScroll();
 }
 
-function getCurrentLineNumberFromCaret() {
-    const caret = sourceText.selectionStart ?? 0;
-    return sourceText.value.slice(0, caret).split("\n").length;
+function getNewLineNumberFromCaret() {
+    const caret = newText.selectionStart ?? 0;
+    return newText.value.slice(0, caret).split("\n").length;
 }
 
-function updateCurrentLineHighlight() {
-    const currentLine = getCurrentLineNumberFromCaret();
-    const style = getComputedStyle(sourceText);
+function updateNewLineHighlight() {
+    const currentLine = getNewLineNumberFromCaret();
+    const style = getComputedStyle(newText);
     const lineHeight = parseFloat(style.lineHeight) || 18;
     const paddingTop = parseFloat(style.paddingTop) || 0;
-    const top = paddingTop + (currentLine - 1) * lineHeight - sourceText.scrollTop;
+    const top = paddingTop + (currentLine - 1) * lineHeight - newText.scrollTop;
 
-    currentLineHighlight.style.height = `${lineHeight}px`;
-    currentLineHighlight.style.top = `${top}px`;
+    newLineHighlight.style.height = `${lineHeight}px`;
+    newLineHighlight.style.top = `${top}px`;
 
     const numberRows = lineNumbers.querySelectorAll(".line-number");
     numberRows.forEach((row, index) => {
@@ -1813,19 +1922,19 @@ function getIndexFromLineNumber(text, lineNumber) {
     return text.length;
 }
 
-function scrollSourceToLine(lineNumber) {
-    const text = sourceText.value;
+function scrollNewTextToLine(lineNumber) {
+    const text = newText.value;
     const caretIndex = getIndexFromLineNumber(text, lineNumber);
 
-    sourceText.focus();
-    sourceText.setSelectionRange(caretIndex, caretIndex);
+    newText.focus();
+    newText.setSelectionRange(caretIndex, caretIndex);
 
     const before = text.slice(0, caretIndex);
     const visualLine = before.split("\n").length;
-    const lineHeight = parseFloat(getComputedStyle(sourceText).lineHeight) || 20;
-    sourceText.scrollTop = Math.max(0, (visualLine - 2) * lineHeight);
+    const lineHeight = parseFloat(getComputedStyle(newText).lineHeight) || 20;
+    newText.scrollTop = Math.max(0, (visualLine - 2) * lineHeight);
     syncLineNumberScroll();
-    updateCurrentLineHighlight();
+    updateNewLineHighlight();
 }
 
 function createColorEditor(sectionName, item, field) {
@@ -2015,14 +2124,14 @@ function renderEditor(parsed) {
             lineBtn.dataset.originalText = `Line ${item.lineNumber}`;
             lineBtn.addEventListener("mouseenter", () => {
                 lineBtn.textContent = "Jump";
-                lineBtn.title = "Current テキストの対応行へ移動します";
+                lineBtn.title = "New テキストの対応行へ移動します";
             });
             lineBtn.addEventListener("mouseleave", () => {
                 lineBtn.textContent = lineBtn.dataset.originalText;
                 lineBtn.title = "";
             });
             lineBtn.addEventListener("click", () => {
-                scrollSourceToLine(item.lineNumber);
+                scrollNewTextToLine(item.lineNumber);
             });
 
             top.appendChild(title);
@@ -2081,7 +2190,7 @@ function importFromText(rawText, options = {}) {
         }
         renderEditor(state);
         updateLineNumbers();
-        renderCompareDiffView();
+        renderOldDiffView();
         setStatus("");
     } catch (error)
     {
@@ -2110,6 +2219,63 @@ function buildColorChipHtml(tokens) {
     return `<span class="save-diff-colors">${chips}</span>`;
 }
 
+function buildLineDescriptionMapFromParsed(parsed) {
+    const lineMap = new Map();
+    parsed.sections.forEach((section) => {
+        section.items.forEach((item) => {
+            const description = item.comments.join("\n").trim();
+            if (!description)
+            {
+                return;
+            }
+            lineMap.set(item.lineNumber, description);
+        });
+    });
+    return lineMap;
+}
+
+function buildSaveLineDescriptionMap() {
+    const currentLines = newText.value.replace(/\r\n/g, "\n").split("\n");
+    const baseLines = baselineText.split("\n");
+    const newToBaseMap = buildNewToBaselineLineMap(currentLines, baseLines);
+
+    const currentParsed = parseStyleConf(newText.value);
+    const currentMap = buildLineDescriptionMapFromParsed(currentParsed);
+
+    if (!baselineText)
+    {
+        return currentMap;
+    }
+
+    const baselineParsed = parseStyleConf(baselineText);
+    const baselineMap = buildLineDescriptionMapFromParsed(baselineParsed);
+
+    for (let currentIndex = 0; currentIndex < newToBaseMap.length; currentIndex += 1)
+    {
+        const currentLineNumber = currentIndex + 1;
+        if (currentMap.has(currentLineNumber))
+        {
+            continue;
+        }
+
+        const baselineIndex = newToBaseMap[currentIndex] ?? -1;
+        if (baselineIndex < 0)
+        {
+            continue;
+        }
+
+        const baselineLineNumber = baselineIndex + 1;
+        if (!baselineMap.has(baselineLineNumber))
+        {
+            continue;
+        }
+
+        currentMap.set(currentLineNumber, baselineMap.get(baselineLineNumber));
+    }
+
+    return currentMap;
+}
+
 function buildSavePreviewHtml(changed) {
     if (changed.length === 0)
     {
@@ -2117,13 +2283,19 @@ function buildSavePreviewHtml(changed) {
     }
 
     const blocks = [];
+    const descriptionMap = buildSaveLineDescriptionMap();
 
     changed.slice(0, 200).forEach((item) => {
         const beforeColors = buildColorChipHtml(extractHexColorTokens(item.before));
         const afterColors = buildColorChipHtml(extractHexColorTokens(item.after));
+        const description = descriptionMap.get(item.lineNumber) || "";
+        const inlineDescription = description.replace(/\s*\n\s*/g, " / ").trim();
+        const lineLabel = inlineDescription
+            ? `Line ${item.lineNumber} - ${inlineDescription}`
+            : `Line ${item.lineNumber}`;
 
         blocks.push(
-            `<div class=\"save-line-label\">Line ${item.lineNumber}</div>`
+            `<div class=\"save-line-label\">${escapeHtml(lineLabel)}</div>`
             + `<pre class=\"save-diff-block\"><code>`
             + `<span class=\"save-diff-remove\">- ${escapeHtml(item.before)}</span>${beforeColors}\n`
             + `<span class=\"save-diff-add\">+ ${escapeHtml(item.after)}</span>${afterColors}`
@@ -2146,7 +2318,7 @@ function downloadCurrentText() {
         return;
     }
 
-    const text = sourceText.value;
+    const text = newText.value;
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
 
@@ -2184,7 +2356,7 @@ async function loadRepositoryStyleConf() {
         }
 
         const text = await response.text();
-        sourceText.value = text;
+        newText.value = text;
         importFromText(text, { keepSourceText: true, setAsBaseline: true });
         resetHistoryWithCurrentState();
         setStatus("Loaded repository style.conf.");
@@ -2202,13 +2374,13 @@ loadRepoBtn.addEventListener("click", () => {
     loadRepositoryStyleConf();
 });
 
-compareFileInput.addEventListener("change", async () => {
-    const [file] = compareFileInput.files || [];
-    await loadCompareStyleConf(file);
+oldFileInput.addEventListener("change", async () => {
+    const [file] = oldFileInput.files || [];
+    await loadOldStyleConf(file);
 });
 
-clearCompareBtn.addEventListener("click", () => {
-    clearCompareStyleConf();
+clearOldBtn.addEventListener("click", () => {
+    clearOldStyleConf();
 });
 
 mergeBtn.addEventListener("click", () => {
@@ -2219,7 +2391,7 @@ mergeAllTextBtn.addEventListener("click", () => {
     setAllMergeChoices(true);
 });
 
-mergeAllCompareBtn.addEventListener("click", () => {
+mergeAllOldBtn.addEventListener("click", () => {
     setAllMergeChoices(false);
 });
 
@@ -2244,17 +2416,17 @@ mergeList.addEventListener("change", (event) => {
         return;
     }
 
-    mergeCandidates[mergeIndex].preferText = !target.checked;
+    mergeCandidates[mergeIndex].preferNew = !target.checked;
 });
 
-compareDiffView.addEventListener("click", (event) => {
+oldDiffView.addEventListener("click", (event) => {
     const target = event.target;
-    if (!(target instanceof Element) || !target.classList.contains("compare-line-number"))
+    if (!(target instanceof Element) || !target.classList.contains("old-line-number"))
     {
         return;
     }
 
-    const row = target.closest(".compare-row");
+    const row = target.closest(".old-row");
     if (!row)
     {
         return;
@@ -2263,38 +2435,38 @@ compareDiffView.addEventListener("click", (event) => {
     const itemSignature = row.dataset.itemSignature || "";
     const leftLine = Number(row.dataset.leftLine || "0");
     const rightLine = Number(row.dataset.rightLine || "0");
-    let sourceLine = leftLine;
+    let newLine = leftLine;
 
-    if (sourceLine <= 0 && itemSignature)
+    if (newLine <= 0 && itemSignature)
     {
-        sourceLine = findSourceLineBySignature(itemSignature, rightLine);
+        newLine = findNewLineBySignature(itemSignature, rightLine);
     }
 
-    if (sourceLine > 0)
+    if (newLine > 0)
     {
-        scrollSourceToLine(sourceLine);
+        scrollNewTextToLine(newLine);
     }
 
     if (itemSignature)
     {
-        const anchor = sourceLine > 0 ? sourceLine : rightLine;
+        const anchor = newLine > 0 ? newLine : rightLine;
         scrollEditorToItemSignature(itemSignature, anchor);
     }
 });
 
-compareDiffView.addEventListener("mouseover", (event) => {
+oldDiffView.addEventListener("mouseover", (event) => {
     const target = event.target;
-    if (!(target instanceof Element) || !target.classList.contains("compare-line-number"))
+    if (!(target instanceof Element) || !target.classList.contains("old-line-number"))
     {
         return;
     }
     target.textContent = "Jump";
-    target.title = "Current の対応行へ移動します";
+    target.title = "New の対応行へ移動します";
 });
 
-compareDiffView.addEventListener("mouseout", (event) => {
+oldDiffView.addEventListener("mouseout", (event) => {
     const target = event.target;
-    if (!(target instanceof Element) || !target.classList.contains("compare-line-number"))
+    if (!(target instanceof Element) || !target.classList.contains("old-line-number"))
     {
         return;
     }
@@ -2382,35 +2554,35 @@ document.addEventListener("keydown", (event) => {
     }
 });
 
-sourceText.addEventListener("input", () => {
+newText.addEventListener("input", () => {
     updateLineNumbers();
-    renderCompareDiffView();
+    renderOldDiffView();
     scheduleHistoryCommit();
     clearTimeout(textSyncTimer);
     textSyncTimer = setTimeout(() => {
-        importFromText(sourceText.value, { keepSourceText: true });
+        importFromText(newText.value, { keepSourceText: true });
     }, 120);
 });
 
-sourceText.addEventListener("scroll", () => {
+newText.addEventListener("scroll", () => {
     syncLineNumberScroll();
-    updateCurrentLineHighlight();
+    updateNewLineHighlight();
 });
 
-sourceText.addEventListener("click", () => {
-    updateCurrentLineHighlight();
+newText.addEventListener("click", () => {
+    updateNewLineHighlight();
 });
 
-sourceText.addEventListener("keyup", () => {
-    updateCurrentLineHighlight();
+newText.addEventListener("keyup", () => {
+    updateNewLineHighlight();
 });
 
-sourceText.addEventListener("focus", () => {
-    updateCurrentLineHighlight();
+newText.addEventListener("focus", () => {
+    updateNewLineHighlight();
 });
 
-sourceText.addEventListener("select", () => {
-    updateCurrentLineHighlight();
+newText.addEventListener("select", () => {
+    updateNewLineHighlight();
 });
 
 fileInput.addEventListener("change", async () => {
@@ -2423,7 +2595,7 @@ fileInput.addEventListener("change", async () => {
     try
     {
         const text = await file.text();
-        sourceText.value = text;
+        newText.value = text;
         importFromText(text, { keepSourceText: true, setAsBaseline: true });
         resetHistoryWithCurrentState();
     } catch (error)
@@ -2436,7 +2608,7 @@ fileInput.addEventListener("change", async () => {
 });
 
 updateLineNumbers();
-renderCompareDiffView();
+renderOldDiffView();
 initializePaneResizer();
 initializeRightPaneResizer();
 resetHistoryWithCurrentState();

@@ -18,10 +18,10 @@
                     <input id="fileInput" type="file" accept=".conf,.txt" />
                     <button id="downloadBtn" type="button" title="現在の style.conf を保存します">Save (Ctrl+S)</button>
                     <button id="loadRepoBtn" type="button" title="このリポジトリの style.conf を読み込みます">Load Repo style.conf</button>
-                    <label class="file-label" for="compareFileInput" title="比較用の style.conf を開きます">Open Compare style.conf</label>
-                    <input id="compareFileInput" type="file" accept=".conf,.txt" />
+                    <label class="file-label" for="oldFileInput" title="比較用の style.conf を開きます">Open Old style.conf</label>
+                    <input id="oldFileInput" type="file" accept=".conf,.txt" />
                     <button id="mergeBtn" type="button" disabled title="マージ確認画面を開きます">Merge</button>
-                    <button id="clearCompareBtn" type="button" disabled title="比較ファイルを解除します">Clear Compare</button>
+                    <button id="clearOldBtn" type="button" disabled title="比較ファイルを解除します">Clear Old</button>
                     <div class="history-actions">
                         <button id="undoBtn" type="button" title="直前の編集を取り消します (Ctrl+Z)">Undo</button>
                         <button id="redoBtn" type="button" title="取り消した編集をやり直します (Ctrl+Shift+Z / Ctrl+Y)">Redo</button>
@@ -49,7 +49,7 @@
 
         <section class="panes">
             <section class="panel raw-panel">
-                <div class="pane-title">Current</div>
+                <div class="pane-title">New</div>
                 <div class="text-editor-box">
                     <div id="lineNumbers" aria-hidden="true"></div>
                     <div class="text-area-wrap">
@@ -65,12 +65,12 @@
 
             <section class="panel editor-panel">
                 <div id="rightSplit" class="right-split">
-                    <section class="right-pane compare-pane-inner">
-                        <p id="compareStatus" class="compare-status">No comparison file loaded.</p>
-                        <div id="compareDiffView" class="compare-diff-view"></div>
+                    <section class="right-pane old-pane-inner">
+                        <p id="oldStatus" class="old-status">No old file loaded.</p>
+                        <div id="oldDiffView" class="old-diff-view"></div>
                     </section>
 
-                    <div id="rightPaneDivider" class="pane-divider inner-divider" role="separator" aria-orientation="vertical" aria-label="Resize compare and editor"></div>
+                    <div id="rightPaneDivider" class="pane-divider inner-divider" role="separator" aria-orientation="vertical" aria-label="Resize old and editor"></div>
 
                     <section class="right-pane editor-pane-inner">
                         <div id="sections"></div>
@@ -106,8 +106,8 @@
             <div class="help-header">
                 <strong id="mergeDialogTitle">Merge confirmation</strong>
                 <div class="help-lang">
-                    <button id="mergeAllTextBtn" type="button" title="全項目を Current 側採用にします">All Current</button>
-                    <button id="mergeAllCompareBtn" type="button" title="全項目を Compare 側採用にします">All Compare</button>
+                    <button id="mergeAllTextBtn" type="button" title="全項目を New 側採用にします">All New</button>
+                    <button id="mergeAllOldBtn" type="button" title="全項目を Old 側採用にします">All Old</button>
                     <button id="mergeCancelBtn" type="button" title="マージをキャンセルします">Cancel</button>
                     <button id="mergeApplyBtn" type="button" title="選択内容でマージを適用します">Apply</button>
                 </div>

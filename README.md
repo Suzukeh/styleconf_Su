@@ -4,3 +4,5 @@ aviutl2のstyle.confのwebエディタ
 style.conf自体に説明が書いてあるので、それを読んで項目を生成する
 
 → このエディタ自体を更新しなくても本体のバージョンアップに着いていけて嬉しい
+
+GitHub Copilotに書いてもらった。ありがとうCopilot。

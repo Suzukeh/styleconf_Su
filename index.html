@@ -14,31 +14,34 @@
             <div class="toolbar-left">
                 <h1>styleconf_Su</h1>
                 <div class="toolbar-actions">
-                    <label class="file-label" for="fileInput">Open (Ctrl+O)</label>
+                    <label class="file-label" for="fileInput" title="ローカルの style.conf を開きます">Open (Ctrl+O)</label>
                     <input id="fileInput" type="file" accept=".conf,.txt" />
-                    <button id="downloadBtn" type="button">Save (Ctrl+S)</button>
-                    <button id="loadRepoBtn" type="button">Load Repo style.conf</button>
+                    <button id="downloadBtn" type="button" title="現在の style.conf を保存します">Save (Ctrl+S)</button>
+                    <button id="loadRepoBtn" type="button" title="このリポジトリの style.conf を読み込みます">Load Repo style.conf</button>
+                    <label class="file-label" for="compareFileInput" title="比較用の style.conf を開きます">Open Compare style.conf</label>
+                    <input id="compareFileInput" type="file" accept=".conf,.txt" />
+                    <button id="mergeBtn" type="button" disabled title="マージ確認画面を開きます">Merge</button>
+                    <button id="clearCompareBtn" type="button" disabled title="比較ファイルを解除します">Clear Compare</button>
                     <div class="history-actions">
-                        <button id="undoBtn" type="button" title="Ctrl+Z">Undo</button>
-                        <button id="redoBtn" type="button" title="Ctrl+Shift+Z / Ctrl+Y">Redo</button>
+                        <button id="undoBtn" type="button" title="直前の編集を取り消します (Ctrl+Z)">Undo</button>
+                        <button id="redoBtn" type="button" title="取り消した編集をやり直します (Ctrl+Shift+Z / Ctrl+Y)">Redo</button>
                         <div class="color-format-group">
-                            <label class="format-label" for="globalColorFormatSelect">Color format</label>
+                            <label class="format-label" for="globalColorFormatSelect" title="色の表示形式を切り替えます">Color format</label>
                             <select id="globalColorFormatSelect">
                                 <option value="hex">HEX</option>
                                 <option value="rgb">RGB</option>
                                 <option value="hsl">HSL</option>
                             </select>
                         </div>
-                        <button id="helpBtn" type="button">Help</button>
+                        <button id="helpBtn" type="button" title="使い方ヘルプを開きます">Help</button>
+                        <a id="readmeBtn" class="repo-link" href="https://github.com/Suzukeh/styleconf_Su/blob/main/README.md" target="_blank" rel="noopener noreferrer" title="リポジトリのREADME.mdを開きます">
+                            <svg class="repo-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                                <path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.01.08-2.11 0 0 .67-.21 2.2.82a7.52 7.52 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.91.08 2.11.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8 8 0 0 0 16 8c0-4.42-3.58-8-8-8Z"></path>
+                            </svg>
+                            README.md
+                        </a>
                     </div>
                 </div>
-            </div>
-            <div class="toolbar-right">
-                <a class="repo-link" href="https://github.com/Suzukeh/styleconf_Su" target="_blank" rel="noopener noreferrer" aria-label="Open GitHub Repository" title="Open GitHub Repository">
-                    <svg class="repo-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                        <path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.01.08-2.11 0 0 .67-.21 2.2.82a7.52 7.52 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.91.08 2.11.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8 8 0 0 0 16 8c0-4.42-3.58-8-8-8Z"></path>
-                    </svg>
-                </a>
             </div>
         </header>
 
@@ -46,27 +49,43 @@
 
         <section class="panes">
             <section class="panel raw-panel">
+                <div class="pane-title">Current</div>
                 <div class="text-editor-box">
                     <div id="lineNumbers" aria-hidden="true"></div>
                     <div class="text-area-wrap">
+                        <div id="editedLinesOverlay" aria-hidden="true"></div>
                         <div id="currentLineHighlight" aria-hidden="true"></div>
-                        <textarea id="sourceText" spellcheck="false"></textarea>
+                        <textarea id="sourceText" spellcheck="false" wrap="off"></textarea>
+                        <div id="beforeValues" aria-hidden="true"></div>
                     </div>
                 </div>
             </section>
 
+            <div id="paneDivider" class="pane-divider" role="separator" aria-orientation="vertical" aria-label="Resize panes"></div>
+
             <section class="panel editor-panel">
-                <div id="sections"></div>
+                <div id="rightSplit" class="right-split">
+                    <section class="right-pane compare-pane-inner">
+                        <p id="compareStatus" class="compare-status">No comparison file loaded.</p>
+                        <div id="compareDiffView" class="compare-diff-view"></div>
+                    </section>
+
+                    <div id="rightPaneDivider" class="pane-divider inner-divider" role="separator" aria-orientation="vertical" aria-label="Resize compare and editor"></div>
+
+                    <section class="right-pane editor-pane-inner">
+                        <div id="sections"></div>
+                    </section>
+                </div>
             </section>
         </section>
 
         <dialog id="helpDialog" class="help-dialog">
             <div class="help-header">
                 <div class="help-lang">
-                    <button id="helpLangJaBtn" type="button">日本語</button>
-                    <button id="helpLangEnBtn" type="button">English</button>
+                    <button id="helpLangJaBtn" type="button" title="日本語ヘルプを表示します">Japanese</button>
+                    <button id="helpLangEnBtn" type="button" title="英語ヘルプを表示します">English</button>
                 </div>
-                <button id="helpCloseBtn" type="button">Close</button>
+                <button id="helpCloseBtn" type="button" title="ヘルプを閉じます">Close</button>
             </div>
             <pre id="helpContent" class="help-content"></pre>
             <a id="helpRepoLink" class="help-repo-link" href="https://github.com/Suzukeh/styleconf_Su" target="_blank" rel="noopener noreferrer">Repository</a>
@@ -76,11 +95,28 @@
             <div class="help-header">
                 <strong id="saveConfirmTitle">Changed lines: 0</strong>
                 <div class="help-lang">
-                    <button id="saveConfirmCancelBtn" type="button">Cancel</button>
-                    <button id="saveConfirmOkBtn" type="button">Save</button>
+                    <button id="saveConfirmCancelBtn" type="button" title="保存をキャンセルします">Cancel</button>
+                    <button id="saveConfirmOkBtn" type="button" title="この内容で保存します">Save</button>
                 </div>
             </div>
             <div id="saveConfirmContent" class="save-confirm-content"></div>
+        </dialog>
+
+        <dialog id="mergeDialog" class="help-dialog">
+            <div class="help-header">
+                <strong id="mergeDialogTitle">Merge confirmation</strong>
+                <div class="help-lang">
+                    <button id="mergeAllTextBtn" type="button" title="全項目を Current 側採用にします">All Current</button>
+                    <button id="mergeAllCompareBtn" type="button" title="全項目を Compare 側採用にします">All Compare</button>
+                    <button id="mergeCancelBtn" type="button" title="マージをキャンセルします">Cancel</button>
+                    <button id="mergeApplyBtn" type="button" title="選択内容でマージを適用します">Apply</button>
+                </div>
+            </div>
+            <label class="merge-global-option">
+                <input id="mergeUseOtherWhenMissing" type="checkbox" checked>
+                Use other side when selected side is missing
+            </label>
+            <div id="mergeList" class="merge-list"></div>
         </dialog>
 
     </main>

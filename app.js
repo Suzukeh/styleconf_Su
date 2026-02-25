@@ -1,7 +1,18 @@
 const sourceText = document.getElementById("sourceText");
 const lineNumbers = document.getElementById("lineNumbers");
+const beforeValues = document.getElementById("beforeValues");
+const editedLinesOverlay = document.getElementById("editedLinesOverlay");
 const currentLineHighlight = document.getElementById("currentLineHighlight");
 const sectionsRoot = document.getElementById("sections");
+const compareFileInput = document.getElementById("compareFileInput");
+const mergeBtn = document.getElementById("mergeBtn");
+const clearCompareBtn = document.getElementById("clearCompareBtn");
+const compareStatus = document.getElementById("compareStatus");
+const compareDiffView = document.getElementById("compareDiffView");
+const panes = document.querySelector(".panes");
+const paneDivider = document.getElementById("paneDivider");
+const rightSplit = document.getElementById("rightSplit");
+const rightPaneDivider = document.getElementById("rightPaneDivider");
 const statusEl = document.getElementById("status");
 const fileInput = document.getElementById("fileInput");
 const loadRepoBtn = document.getElementById("loadRepoBtn");
@@ -19,6 +30,14 @@ const saveConfirmTitle = document.getElementById("saveConfirmTitle");
 const saveConfirmContent = document.getElementById("saveConfirmContent");
 const saveConfirmCancelBtn = document.getElementById("saveConfirmCancelBtn");
 const saveConfirmOkBtn = document.getElementById("saveConfirmOkBtn");
+const mergeDialog = document.getElementById("mergeDialog");
+const mergeDialogTitle = document.getElementById("mergeDialogTitle");
+const mergeList = document.getElementById("mergeList");
+const mergeAllTextBtn = document.getElementById("mergeAllTextBtn");
+const mergeAllCompareBtn = document.getElementById("mergeAllCompareBtn");
+const mergeCancelBtn = document.getElementById("mergeCancelBtn");
+const mergeApplyBtn = document.getElementById("mergeApplyBtn");
+const mergeUseOtherWhenMissing = document.getElementById("mergeUseOtherWhenMissing");
 const globalColorFormatSelect = document.getElementById("globalColorFormatSelect");
 
 const downloadBtn = document.getElementById("downloadBtn");
@@ -34,11 +53,880 @@ let baselineText = "";
 let baselineValueMap = new Map();
 let colorInputFormat = "hex";
 let colorRowStates = [];
+let compareText = "";
+let compareFileName = "";
+let sourceLineRefs = [];
+let mergeCandidates = [];
 const maxHistorySize = 300;
 
 function setStatus(message, isError = false) {
     statusEl.textContent = message;
     statusEl.style.color = isError ? "#ff9f9f" : "#d0d0d0";
+}
+
+function setCompareStatus(message, isError = false) {
+    compareStatus.textContent = message;
+    compareStatus.style.color = isError ? "#ff9f9f" : "#d0d0d0";
+}
+
+function updateCompareLayoutState() {
+    const hasCompare = Boolean(compareText);
+    rightSplit.classList.toggle("compare-hidden", !hasCompare);
+    mergeBtn.disabled = !hasCompare;
+    clearCompareBtn.disabled = !hasCompare;
+}
+
+function buildParsedItemMap(parsed) {
+    const map = new Map();
+    parsed.sections.forEach((section) => {
+        section.items.forEach((item) => {
+            map.set(buildItemSignature(section.name, item.key), {
+                sectionName: section.name,
+                key: item.key,
+                value: item.value,
+                comments: item.comments.slice()
+            });
+        });
+    });
+    return map;
+}
+
+function buildParsedItemMapWithLine(parsed) {
+    const map = new Map();
+    parsed.sections.forEach((section) => {
+        section.items.forEach((item) => {
+            map.set(buildItemSignature(section.name, item.key), {
+                sectionName: section.name,
+                key: item.key,
+                value: item.value,
+                comments: item.comments.slice(),
+                lineNumber: item.lineNumber || 0
+            });
+        });
+    });
+    return map;
+}
+
+function findSection(parsed, sectionName) {
+    return parsed.sections.find((section) => section.name === sectionName) || null;
+}
+
+function setParsedItem(parsed, sectionName, key, value, comments) {
+    let section = findSection(parsed, sectionName);
+    if (!section)
+    {
+        section = { name: sectionName, items: [] };
+        parsed.sections.push(section);
+    }
+
+    const existing = section.items.find((item) => item.key === key);
+    if (existing)
+    {
+        existing.value = value;
+        existing.comments = comments.slice();
+        return;
+    }
+
+    section.items.push({
+        key,
+        value,
+        comments: comments.slice(),
+        lineNumber: 0
+    });
+}
+
+function removeParsedItem(parsed, sectionName, key) {
+    const section = findSection(parsed, sectionName);
+    if (!section)
+    {
+        return;
+    }
+    section.items = section.items.filter((item) => item.key !== key);
+}
+
+function removeEmptySections(parsed) {
+    parsed.sections = parsed.sections.filter((section) => section.items.length > 0);
+}
+
+function applyValueOnlyToCurrentText(originalText, beforeParsed, afterParsed) {
+    const beforeMap = buildParsedItemMapWithLine(beforeParsed);
+    const afterMap = buildParsedItemMap(afterParsed);
+    const signatures = new Set([...beforeMap.keys(), ...afterMap.keys()]);
+    const lines = originalText.replace(/\r\n/g, "\n").split("\n");
+    let requiresStructuralRewrite = false;
+
+    signatures.forEach((signature) => {
+        const beforeItem = beforeMap.get(signature) || null;
+        const afterItem = afterMap.get(signature) || null;
+
+        if (!beforeItem || !afterItem)
+        {
+            requiresStructuralRewrite = true;
+            return;
+        }
+
+        if (beforeItem.value === afterItem.value)
+        {
+            return;
+        }
+
+        const lineIndex = (beforeItem.lineNumber || 0) - 1;
+        if (lineIndex < 0 || lineIndex >= lines.length)
+        {
+            requiresStructuralRewrite = true;
+            return;
+        }
+
+        const currentLine = lines[lineIndex] ?? "";
+        const escapedKey = escapeRegExp(beforeItem.key);
+        const linePattern = new RegExp(`^(\\s*${escapedKey}\\s*=\\s*)(.*?)(\\s*)$`);
+        const matched = currentLine.match(linePattern);
+        if (!matched)
+        {
+            requiresStructuralRewrite = true;
+            return;
+        }
+
+        lines[lineIndex] = `${matched[1]}${afterItem.value}${matched[3]}`;
+    });
+
+    if (requiresStructuralRewrite)
+    {
+        return {
+            text: serializeStyleConf(afterParsed),
+            usedStructuralRewrite: true
+        };
+    }
+
+    return {
+        text: lines.join("\n"),
+        usedStructuralRewrite: false
+    };
+}
+
+function formatValueLikeEditor(value) {
+    const text = String(value ?? "");
+    if (!isColorValue(text))
+    {
+        return text;
+    }
+
+    const tokens = text.split(",").map((token) => token.trim()).filter((token) => token !== "");
+    if (tokens.length === 0)
+    {
+        return text;
+    }
+
+    return tokens
+        .map((token) => {
+            const normalized = normalizeHexToken(token);
+            if (!normalized)
+            {
+                return token;
+            }
+            return convertHexTokenToFormat(normalized, colorInputFormat);
+        })
+        .join(", ");
+}
+
+function buildMergeDescription(candidate) {
+    const sourceDescription = candidate.source ? candidate.source.comments.join("\n").trim() : "";
+    const compareDescription = candidate.compare ? candidate.compare.comments.join("\n").trim() : "";
+
+    if (sourceDescription && compareDescription)
+    {
+        if (sourceDescription === compareDescription)
+        {
+            return sourceDescription;
+        }
+        return `Current: ${sourceDescription}\nCompare: ${compareDescription}`;
+    }
+
+    return sourceDescription || compareDescription;
+}
+
+function buildMergeCandidates(sourceParsed, compareParsed) {
+    const sourceMap = buildParsedItemMap(sourceParsed);
+    const compareMap = buildParsedItemMap(compareParsed);
+    const signatures = new Set([...sourceMap.keys(), ...compareMap.keys()]);
+    const candidates = [];
+
+    signatures.forEach((signature) => {
+        const sourceItem = sourceMap.get(signature) || null;
+        const compareItem = compareMap.get(signature) || null;
+        const sourceValue = sourceItem ? sourceItem.value : "";
+        const compareValue = compareItem ? compareItem.value : "";
+
+        if (sourceItem && compareItem && sourceValue === compareValue)
+        {
+            return;
+        }
+
+        const info = sourceItem || compareItem;
+        candidates.push({
+            signature,
+            sectionName: info.sectionName,
+            key: info.key,
+            source: sourceItem,
+            compare: compareItem,
+            preferText: Boolean(sourceItem)
+        });
+    });
+
+    return candidates.sort((a, b) => {
+        const sectionOrder = a.sectionName.localeCompare(b.sectionName);
+        if (sectionOrder !== 0)
+        {
+            return sectionOrder;
+        }
+        return a.key.localeCompare(b.key);
+    });
+}
+
+function renderMergeDialogList() {
+    if (mergeCandidates.length === 0)
+    {
+        mergeList.innerHTML = "<div class=\"merge-empty\">No merge candidates.</div>";
+        mergeApplyBtn.disabled = true;
+        return;
+    }
+
+    mergeApplyBtn.disabled = false;
+    const rows = mergeCandidates.map((candidate, index) => {
+        const sourceRawValue = candidate.source ? candidate.source.value : "";
+        const compareRawValue = candidate.compare ? candidate.compare.value : "";
+        const sourceValue = candidate.source ? formatValueLikeEditor(sourceRawValue) : "(missing)";
+        const compareValue = candidate.compare ? formatValueLikeEditor(compareRawValue) : "(missing)";
+        const sourceColors = candidate.source ? buildColorChipHtml(extractHexColorTokens(sourceRawValue)) : "";
+        const compareColors = candidate.compare ? buildColorChipHtml(extractHexColorTokens(compareRawValue)) : "";
+        const checked = candidate.preferText ? "" : " checked";
+        const description = buildMergeDescription(candidate);
+        const descriptionHtml = description
+            ? `<p class="merge-item-desc">${escapeHtml(description)}</p>`
+            : "";
+
+        return `
+<div class="merge-row" data-merge-index="${index}">
+  <div class="merge-row-head">
+    <span class="merge-item-name">[${escapeHtml(candidate.sectionName)}] ${escapeHtml(candidate.key)}</span>
+    <label class="merge-choice-label">
+      <input type="checkbox" data-merge-index="${index}"${checked}>
+            Use Compare
+    </label>
+  </div>
+    ${descriptionHtml}
+  <div class="merge-row-values">
+                <div class="merge-value"><span class="merge-value-title">Current</span>${escapeHtml(sourceValue)}<span class="merge-value-colors">${sourceColors}</span></div>
+        <div class="merge-value"><span class="merge-value-title">Compare</span>${escapeHtml(compareValue)}<span class="merge-value-colors">${compareColors}</span></div>
+  </div>
+</div>`;
+    });
+
+    mergeList.innerHTML = rows.join("");
+}
+
+function setAllMergeChoices(preferText) {
+    mergeCandidates.forEach((candidate) => {
+        candidate.preferText = preferText;
+    });
+
+    mergeList.querySelectorAll("input[type=checkbox][data-merge-index]").forEach((checkbox) => {
+        checkbox.checked = !preferText;
+    });
+}
+
+function openMergeDialog() {
+    if (!compareText)
+    {
+        setStatus("Open a compare style.conf first.", true);
+        return;
+    }
+
+    try
+    {
+        const sourceParsed = parseStyleConf(sourceText.value);
+        const compareParsed = parseStyleConf(compareText);
+
+        if (sourceParsed.sections.length === 0 || compareParsed.sections.length === 0)
+        {
+            throw new Error("No section found. Please check style.conf format.");
+        }
+
+        mergeCandidates = buildMergeCandidates(sourceParsed, compareParsed);
+        mergeDialogTitle.textContent = `Merge confirmation (${mergeCandidates.length} items)`;
+        renderMergeDialogList();
+        mergeDialog.showModal();
+    } catch (error)
+    {
+        setStatus(`Merge failed: ${error.message}`, true);
+    }
+}
+
+function applyMergeSelections() {
+    if (!compareText)
+    {
+        mergeDialog.close();
+        setStatus("Open a compare style.conf first.", true);
+        return;
+    }
+
+    try
+    {
+        const sourceParsed = parseStyleConf(sourceText.value);
+        const sourceParsedBeforeMerge = parseStyleConf(sourceText.value);
+        const useOtherWhenMissing = mergeUseOtherWhenMissing.checked;
+
+        mergeCandidates.forEach((candidate) => {
+            const selectedItem = candidate.preferText ? candidate.source : candidate.compare;
+            const otherItem = candidate.preferText ? candidate.compare : candidate.source;
+
+            if (selectedItem)
+            {
+                setParsedItem(sourceParsed, candidate.sectionName, candidate.key, selectedItem.value, selectedItem.comments);
+                return;
+            }
+
+            if (useOtherWhenMissing && otherItem)
+            {
+                setParsedItem(sourceParsed, candidate.sectionName, candidate.key, otherItem.value, otherItem.comments);
+            }
+        });
+
+        removeEmptySections(sourceParsed);
+
+        const mergedCurrent = applyValueOnlyToCurrentText(sourceText.value, sourceParsedBeforeMerge, sourceParsed);
+        const mergedSourceText = mergedCurrent.text;
+        sourceText.value = mergedSourceText;
+        importFromText(mergedSourceText, { keepSourceText: true });
+        pushHistorySnapshot(createSnapshot());
+
+        mergeDialog.close();
+        setStatus(mergedCurrent.usedStructuralRewrite
+            ? "Merge applied (includes structural changes)."
+            : "Merge applied (value-only update for Current)."
+        );
+    } catch (error)
+    {
+        setStatus(`Merge failed: ${error.message}`, true);
+    }
+}
+
+function escapeCompareLine(text) {
+    return text
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;")
+        .replaceAll(" ", "&nbsp;");
+}
+
+function normalizeItemKey(key) {
+    return (key || "").trim().toLowerCase();
+}
+
+function normalizeSectionName(sectionName) {
+    return (sectionName || "").trim().toLowerCase();
+}
+
+function buildItemSignature(sectionName, itemKey) {
+    const normalizedKey = normalizeItemKey(itemKey);
+    if (!normalizedKey)
+    {
+        return "";
+    }
+    return `${normalizeSectionName(sectionName)}::${normalizedKey}`;
+}
+
+function extractLineRef(lineText, currentSectionName) {
+    const trimmed = (lineText ?? "").trim();
+    if (trimmed === "")
+    {
+        return { sectionName: currentSectionName, itemKey: "", signature: "" };
+    }
+
+    const sectionMatch = trimmed.match(/^\[([^\]]+)\]$/);
+    if (sectionMatch)
+    {
+        const nextSectionName = sectionMatch[1].trim();
+        return { sectionName: nextSectionName, itemKey: "", signature: "" };
+    }
+
+    if (trimmed.startsWith(";"))
+    {
+        return { sectionName: currentSectionName, itemKey: "", signature: "" };
+    }
+
+    const equalIndex = lineText.indexOf("=");
+    if (equalIndex <= 0)
+    {
+        return { sectionName: currentSectionName, itemKey: "", signature: "" };
+    }
+
+    const itemKey = lineText.slice(0, equalIndex).trim();
+    return {
+        sectionName: currentSectionName,
+        itemKey,
+        signature: buildItemSignature(currentSectionName, itemKey)
+    };
+}
+
+function buildLineRefs(lines) {
+    const refs = [];
+    let currentSectionName = "";
+
+    lines.forEach((lineText) => {
+        const ref = extractLineRef(lineText, currentSectionName);
+        if (ref.sectionName !== currentSectionName)
+        {
+            currentSectionName = ref.sectionName;
+        }
+        refs.push({
+            sectionName: currentSectionName,
+            itemKey: ref.itemKey,
+            signature: ref.signature
+        });
+    });
+
+    return refs;
+}
+
+function renderCompareDiffView() {
+    updateCompareLayoutState();
+
+    if (!compareText)
+    {
+        compareDiffView.innerHTML = "<div class=\"compare-empty\">Open Compare style.conf to show diff.</div>";
+        return;
+    }
+
+    const leftLines = sourceText.value.replace(/\r\n/g, "\n").split("\n");
+    const rightLines = compareText.replace(/\r\n/g, "\n").split("\n");
+    const leftRefs = buildLineRefs(leftLines);
+    const rightRefs = buildLineRefs(rightLines);
+    sourceLineRefs = leftRefs;
+    const diffRows = buildLcsDiffRows(leftLines, rightLines, leftRefs, rightRefs);
+    const rows = [];
+
+    diffRows.forEach((row) => {
+        const lineNumberLabel = row.rightLineNumber === null ? "·" : String(row.rightLineNumber);
+        const leftAttr = row.leftLineNumber === null ? "" : ` data-left-line=\"${row.leftLineNumber}\"`;
+        const rightAttr = row.rightLineNumber === null ? "" : ` data-right-line=\"${row.rightLineNumber}\"`;
+        const itemSignatureAttr = row.itemSignature === "" ? "" : ` data-item-signature=\"${escapeHtml(row.itemSignature)}\"`;
+        const originalLabelAttr = ` data-original-label=\"${escapeHtml(lineNumberLabel)}\"`;
+
+        rows.push(
+            `<div class="compare-row ${row.rowClass}"${leftAttr}${rightAttr}${itemSignatureAttr} title="${escapeHtml(row.title)}">`
+            + `<span class="compare-line-number"${originalLabelAttr}>${lineNumberLabel}</span>`
+            + `<span class="compare-marker">${row.marker}</span>`
+            + `<span class="compare-line-text">${escapeCompareLine(row.rightText)}</span>`
+            + `</div>`
+        );
+    });
+
+    compareDiffView.innerHTML = rows.join("");
+}
+
+function buildLcsDiffRows(leftLines, rightLines, leftRefs, rightRefs) {
+    const operations = buildLcsOperations(leftLines, rightLines);
+    const merged = mergeReplaceOperations(operations);
+
+    return merged.map((operation) => {
+        if (operation.type === "equal")
+        {
+            return {
+                rowClass: "same",
+                marker: "=",
+                title: "",
+                rightText: operation.rightText,
+                leftLineNumber: operation.leftLineNumber,
+                rightLineNumber: operation.rightLineNumber,
+                itemSignature: leftRefs[operation.leftLineNumber - 1]?.signature || rightRefs[operation.rightLineNumber - 1]?.signature || ""
+            };
+        }
+
+        if (operation.type === "insert")
+        {
+            return {
+                rowClass: "added",
+                marker: "+",
+                title: "Only in compare file",
+                rightText: operation.rightText,
+                leftLineNumber: null,
+                rightLineNumber: operation.rightLineNumber,
+                itemSignature: rightRefs[operation.rightLineNumber - 1]?.signature || ""
+            };
+        }
+
+        if (operation.type === "delete")
+        {
+            return {
+                rowClass: "removed",
+                marker: "-",
+                title: `Left only: ${operation.leftText}`,
+                rightText: "",
+                leftLineNumber: operation.leftLineNumber,
+                rightLineNumber: null,
+                itemSignature: leftRefs[operation.leftLineNumber - 1]?.signature || ""
+            };
+        }
+
+        return {
+            rowClass: "changed",
+            marker: "~",
+            title: `Left: ${operation.leftText}`,
+            rightText: operation.rightText,
+            leftLineNumber: operation.leftLineNumber,
+            rightLineNumber: operation.rightLineNumber,
+            itemSignature: leftRefs[operation.leftLineNumber - 1]?.signature || rightRefs[operation.rightLineNumber - 1]?.signature || ""
+        };
+    });
+}
+
+function getClosestByLineDistance(candidates, targetLine, lineAccessor) {
+    if (candidates.length === 0)
+    {
+        return null;
+    }
+    if (!Number.isFinite(targetLine))
+    {
+        return candidates[0];
+    }
+
+    let best = candidates[0];
+    let bestDistance = Math.abs(lineAccessor(best) - targetLine);
+    for (let index = 1; index < candidates.length; index += 1)
+    {
+        const candidate = candidates[index];
+        const candidateDistance = Math.abs(lineAccessor(candidate) - targetLine);
+        if (candidateDistance < bestDistance)
+        {
+            best = candidate;
+            bestDistance = candidateDistance;
+        }
+    }
+    return best;
+}
+
+function findCompareRowBySignature(itemSignature, anchorLeftLine) {
+    if (!itemSignature)
+    {
+        return null;
+    }
+
+    const allRows = Array.from(compareDiffView.querySelectorAll(".compare-row"));
+    const keyRows = allRows.filter((row) => row.dataset.itemSignature === itemSignature);
+    return getClosestByLineDistance(
+        keyRows,
+        anchorLeftLine,
+        (row) => Number(row.dataset.leftLine || row.dataset.rightLine || "0")
+    );
+}
+
+function findSourceLineBySignature(itemSignature, anchorLineNumber) {
+    if (!itemSignature || sourceLineRefs.length === 0)
+    {
+        return 0;
+    }
+
+    const candidates = [];
+    for (let index = 0; index < sourceLineRefs.length; index += 1)
+    {
+        if (sourceLineRefs[index].signature === itemSignature)
+        {
+            candidates.push(index + 1);
+        }
+    }
+
+    if (candidates.length === 0)
+    {
+        return 0;
+    }
+
+    if (!Number.isFinite(anchorLineNumber) || anchorLineNumber <= 0)
+    {
+        return candidates[0];
+    }
+
+    let bestLine = candidates[0];
+    let bestDistance = Math.abs(bestLine - anchorLineNumber);
+    for (let index = 1; index < candidates.length; index += 1)
+    {
+        const candidateLine = candidates[index];
+        const candidateDistance = Math.abs(candidateLine - anchorLineNumber);
+        if (candidateDistance < bestDistance)
+        {
+            bestLine = candidateLine;
+            bestDistance = candidateDistance;
+        }
+    }
+
+    return bestLine;
+}
+
+function highlightCompareRow(row) {
+    if (!row)
+    {
+        return;
+    }
+    row.scrollIntoView({ block: "center", behavior: "smooth" });
+    compareDiffView.querySelectorAll(".compare-row.focus").forEach((focusRow) => {
+        focusRow.classList.remove("focus");
+    });
+    row.classList.add("focus");
+    setTimeout(() => {
+        row.classList.remove("focus");
+    }, 900);
+}
+
+function buildLcsOperations(leftLines, rightLines) {
+    const leftLength = leftLines.length;
+    const rightLength = rightLines.length;
+    const matrix = Array.from({ length: leftLength + 1 }, () => new Uint16Array(rightLength + 1));
+
+    for (let leftIndex = leftLength - 1; leftIndex >= 0; leftIndex -= 1)
+    {
+        for (let rightIndex = rightLength - 1; rightIndex >= 0; rightIndex -= 1)
+        {
+            if (leftLines[leftIndex] === rightLines[rightIndex])
+            {
+                matrix[leftIndex][rightIndex] = matrix[leftIndex + 1][rightIndex + 1] + 1;
+            } else
+            {
+                matrix[leftIndex][rightIndex] = Math.max(matrix[leftIndex + 1][rightIndex], matrix[leftIndex][rightIndex + 1]);
+            }
+        }
+    }
+
+    const operations = [];
+    let leftIndex = 0;
+    let rightIndex = 0;
+
+    while (leftIndex < leftLength || rightIndex < rightLength)
+    {
+        if (leftIndex < leftLength && rightIndex < rightLength && leftLines[leftIndex] === rightLines[rightIndex])
+        {
+            operations.push({
+                type: "equal",
+                leftText: leftLines[leftIndex],
+                rightText: rightLines[rightIndex],
+                leftLineNumber: leftIndex + 1,
+                rightLineNumber: rightIndex + 1
+            });
+            leftIndex += 1;
+            rightIndex += 1;
+            continue;
+        }
+
+        if (rightIndex < rightLength && (leftIndex === leftLength || matrix[leftIndex][rightIndex + 1] >= matrix[leftIndex + 1][rightIndex]))
+        {
+            operations.push({
+                type: "insert",
+                rightText: rightLines[rightIndex],
+                rightLineNumber: rightIndex + 1
+            });
+            rightIndex += 1;
+            continue;
+        }
+
+        operations.push({
+            type: "delete",
+            leftText: leftLines[leftIndex],
+            leftLineNumber: leftIndex + 1
+        });
+        leftIndex += 1;
+    }
+
+    return operations;
+}
+
+function mergeReplaceOperations(operations) {
+    const merged = [];
+    let index = 0;
+
+    while (index < operations.length)
+    {
+        const operation = operations[index];
+        if (operation.type === "delete" || operation.type === "insert")
+        {
+            const deletes = [];
+            const inserts = [];
+
+            while (index < operations.length && (operations[index].type === "delete" || operations[index].type === "insert"))
+            {
+                if (operations[index].type === "delete")
+                {
+                    deletes.push(operations[index]);
+                } else
+                {
+                    inserts.push(operations[index]);
+                }
+                index += 1;
+            }
+
+            const replaceCount = Math.min(deletes.length, inserts.length);
+            for (let i = 0; i < replaceCount; i += 1)
+            {
+                merged.push({
+                    type: "replace",
+                    leftText: deletes[i].leftText,
+                    rightText: inserts[i].rightText,
+                    leftLineNumber: deletes[i].leftLineNumber,
+                    rightLineNumber: inserts[i].rightLineNumber
+                });
+            }
+
+            for (let i = replaceCount; i < deletes.length; i += 1)
+            {
+                merged.push(deletes[i]);
+            }
+            for (let i = replaceCount; i < inserts.length; i += 1)
+            {
+                merged.push(inserts[i]);
+            }
+            continue;
+        }
+
+        merged.push(operation);
+        index += 1;
+    }
+
+    return merged;
+}
+
+function initializePaneResizer() {
+    if (!panes || !paneDivider)
+    {
+        return;
+    }
+
+    const minPaneWidth = 280;
+    const dividerWidth = 8;
+    let isResizing = false;
+
+    const stopResizing = () => {
+        isResizing = false;
+        document.body.classList.remove("pane-resizing");
+    };
+
+    const onPointerMove = (event) => {
+        if (!isResizing)
+        {
+            return;
+        }
+        if (window.matchMedia("(max-width: 1100px)").matches)
+        {
+            stopResizing();
+            return;
+        }
+
+        const panesRect = panes.getBoundingClientRect();
+        const maxLeft = panesRect.width - minPaneWidth - dividerWidth;
+        const nextLeft = Math.max(minPaneWidth, Math.min(maxLeft, event.clientX - panesRect.left));
+        const nextRight = panesRect.width - nextLeft - dividerWidth;
+        panes.style.gridTemplateColumns = `${nextLeft}px ${dividerWidth}px ${nextRight}px`;
+    };
+
+    paneDivider.addEventListener("mousedown", (event) => {
+        if (window.matchMedia("(max-width: 1100px)").matches)
+        {
+            return;
+        }
+        event.preventDefault();
+        isResizing = true;
+        document.body.classList.add("pane-resizing");
+    });
+
+    window.addEventListener("mousemove", onPointerMove);
+    window.addEventListener("mouseup", stopResizing);
+
+    window.addEventListener("resize", () => {
+        if (window.matchMedia("(max-width: 1100px)").matches)
+        {
+            panes.style.removeProperty("grid-template-columns");
+        }
+    });
+}
+
+function initializeRightPaneResizer() {
+    if (!rightSplit || !rightPaneDivider)
+    {
+        return;
+    }
+
+    const minPaneWidth = 220;
+    const dividerWidth = 8;
+    let isResizing = false;
+
+    const stopResizing = () => {
+        isResizing = false;
+        document.body.classList.remove("pane-resizing");
+    };
+
+    const onPointerMove = (event) => {
+        if (!isResizing)
+        {
+            return;
+        }
+        if (window.matchMedia("(max-width: 1100px)").matches)
+        {
+            stopResizing();
+            return;
+        }
+
+        const splitRect = rightSplit.getBoundingClientRect();
+        const maxLeft = splitRect.width - minPaneWidth - dividerWidth;
+        const nextLeft = Math.max(minPaneWidth, Math.min(maxLeft, event.clientX - splitRect.left));
+        const nextRight = splitRect.width - nextLeft - dividerWidth;
+        rightSplit.style.gridTemplateColumns = `${nextLeft}px ${dividerWidth}px ${nextRight}px`;
+    };
+
+    rightPaneDivider.addEventListener("mousedown", (event) => {
+        if (window.matchMedia("(max-width: 1100px)").matches)
+        {
+            return;
+        }
+        event.preventDefault();
+        isResizing = true;
+        document.body.classList.add("pane-resizing");
+    });
+
+    window.addEventListener("mousemove", onPointerMove);
+    window.addEventListener("mouseup", stopResizing);
+
+    window.addEventListener("resize", () => {
+        if (window.matchMedia("(max-width: 1100px)").matches)
+        {
+            rightSplit.style.removeProperty("grid-template-columns");
+        }
+    });
+}
+
+async function loadCompareStyleConf(file) {
+    if (!file)
+    {
+        return;
+    }
+
+    try
+    {
+        const text = await file.text();
+        compareText = text;
+        compareFileName = file.name || "style.conf";
+        setCompareStatus(`Compare file: ${compareFileName}`);
+        renderCompareDiffView();
+    } catch (error)
+    {
+        setCompareStatus(`Failed to read compare file: ${error.message}`, true);
+    }
+}
+
+function clearCompareStyleConf() {
+    compareText = "";
+    compareFileName = "";
+    compareFileInput.value = "";
+    setCompareStatus("No comparison file loaded.");
+    renderCompareDiffView();
 }
 
 function updateUndoRedoButtons() {
@@ -165,14 +1053,59 @@ function updateFieldEditedState(field, sectionName, item) {
     if (!edited)
     {
         beforeValueEl.textContent = "";
-        beforeValueEl.hidden = true;
+        beforeValueEl.title = "";
+        beforeValueEl.dataset.beforeLabel = "";
+        beforeValueEl.classList.remove("reset-enabled");
+        beforeValueEl.classList.add("inactive");
         return;
     }
 
     const baselineValue = getBaselineItemValue(sectionName, item);
-    beforeValueEl.textContent = `Before: ${baselineValue ?? ""}`;
-    beforeValueEl.title = `Before: ${baselineValue ?? ""}`;
-    beforeValueEl.hidden = false;
+    const beforeLabel = baselineValue ?? "";
+    beforeValueEl.dataset.beforeLabel = beforeLabel;
+    beforeValueEl.textContent = beforeLabel;
+    beforeValueEl.title = beforeLabel;
+    beforeValueEl.classList.add("reset-enabled");
+    beforeValueEl.classList.remove("inactive");
+}
+
+function resetSourceLineToBaseline(lineNumber) {
+    const lineIndex = lineNumber - 1;
+    if (lineIndex < 0)
+    {
+        return;
+    }
+
+    const lines = sourceText.value.replace(/\r\n/g, "\n").split("\n");
+    const baseLines = baselineText.split("\n");
+    const baselineLineText = baseLines[lineIndex] ?? "";
+    const currentLineText = lines[lineIndex] ?? "";
+    if (currentLineText === baselineLineText)
+    {
+        return;
+    }
+
+    while (lines.length <= lineIndex)
+    {
+        lines.push("");
+    }
+    lines[lineIndex] = baselineLineText;
+
+    sourceText.value = lines.join("\n");
+    importFromText(sourceText.value, { keepSourceText: true });
+    pushHistorySnapshot(createSnapshot());
+}
+
+function resetEditorItemToBaseline(sectionName, item) {
+    const baselineValue = getBaselineItemValue(sectionName, item);
+    if (baselineValue === undefined || item.value === baselineValue)
+    {
+        return;
+    }
+
+    item.value = baselineValue;
+    updateSourceTextFromState(item);
+    importFromText(sourceText.value, { keepSourceText: true });
 }
 
 function showHelp() {
@@ -185,27 +1118,43 @@ function updateHelpContent() {
     {
         helpContent.textContent =
             "styleconf_Su ヘルプ\n\n"
-            + "・Open (Ctrl+O): ローカルの style.conf を開きます\n"
-            + "・Save (Ctrl+S): 現在の style.conf を保存します\n"
-            + "・Load Repo style.conf: このリポジトリの ./style.conf を読み込みます\n"
-            + "・Undo (Ctrl+Z): 直前の編集を取り消します\n"
-            + "・Redo (Ctrl+Shift+Z / Ctrl+Y): 取り消した編集をやり直します\n"
-            + "・左の行番号クリック: 右エディタの対応項目へジャンプします\n"
-            + "・右の Line ボタンクリック: 左テキストの対応行へジャンプします\n"
-            + "・テキストとエディタはリアルタイムで同期されます";
+            + "・Open (Ctrl+O): Current の style.conf を開きます\n"
+            + "・Save (Ctrl+S): Current を保存します\n"
+            + "・Load Repo style.conf: リポジトリの style.conf を読み込みます\n"
+            + "・Open Compare style.conf: 比較用ファイルを開きます\n"
+            + "・Merge: マージ確認画面を開きます\n"
+            + "  - All Current / All Compare で一括選択\n"
+            + "  - 各項目のチェックで Current / Compare を個別選択\n"
+            + "・Clear Compare: 比較ファイルを解除します\n"
+            + "・Undo/Redo: Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y\n"
+            + "・Color format: HEX / RGB / HSL の表示形式を切替\n"
+            + "・左行番号クリック: Compare と Editor の対応項目へジャンプ\n"
+            + "・Compare 行番号クリック: Current と Editor の対応項目へジャンプ\n"
+            + "・Editor の Before 値ホバーで Reset、クリックで編集前に戻す\n"
+            + "・テキスト右側の Reset で行単位で編集前に戻す\n"
+            + "・中央境界のドラッグでペイン幅調整\n"
+            + "・Compare を開くと Current / Compare file タイトルを表示";
         helpRepoLink.textContent = "Repository: https://github.com/Suzukeh/styleconf_Su";
     } else
     {
         helpContent.textContent =
             "styleconf_Su Help\n\n"
-            + "- Open (Ctrl+O): Open a local style.conf file\n"
-            + "- Save (Ctrl+S): Download current style.conf\n"
-            + "- Load Repo style.conf: Load ./style.conf from this repository\n"
-            + "- Undo (Ctrl+Z): Undo last change\n"
-            + "- Redo (Ctrl+Shift+Z / Ctrl+Y): Redo undone change\n"
-            + "- Left line number click: Jump to matching item in editor\n"
-            + "- Right Line button click: Jump to matching source text line\n"
-            + "- Raw text and editor are synchronized in real time";
+            + "- Open (Ctrl+O): Open style.conf into Current\n"
+            + "- Save (Ctrl+S): Save Current\n"
+            + "- Load Repo style.conf: Load repository style.conf\n"
+            + "- Open Compare style.conf: Open comparison file\n"
+            + "- Merge: Open merge confirmation dialog\n"
+            + "  - All Current / All Compare for bulk selection\n"
+            + "  - Per-item checkbox to choose Current vs Compare\n"
+            + "- Clear Compare: Remove comparison file\n"
+            + "- Undo/Redo: Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y\n"
+            + "- Color format: Switch HEX / RGB / HSL display\n"
+            + "- Left line number click: Jump to matched Compare and Editor item\n"
+            + "- Compare line number click: Jump to matched Current and Editor item\n"
+            + "- Hover Before value in Editor to show Reset and restore\n"
+            + "- Use right-side Reset to restore Current line\n"
+            + "- Drag pane dividers to resize layout\n"
+            + "- Current / Compare file titles are shown in compare mode";
         helpRepoLink.textContent = "Repository: https://github.com/Suzukeh/styleconf_Su";
     }
 
@@ -640,8 +1589,10 @@ function updateSourceTextFromState(changedItem = null) {
 function updateLineNumbers() {
     const lineCount = Math.max(1, sourceText.value.split("\n").length);
     const currentLines = sourceText.value.split("\n");
+    sourceLineRefs = buildLineRefs(currentLines);
     const baseLines = baselineText.split("\n");
     const fragment = document.createDocumentFragment();
+    const beforeFragment = document.createDocumentFragment();
     for (let line = 1; line <= lineCount; line += 1)
     {
         const lineEl = document.createElement("div");
@@ -651,42 +1602,106 @@ function updateLineNumbers() {
         const baselineLineText = baseLines[lineIndex] ?? "";
         const edited = currentLineText !== baselineLineText;
         lineEl.classList.toggle("edited", edited);
+        lineEl.textContent = String(line);
+        lineEl.dataset.originalText = String(line);
 
-        const lineNum = document.createElement("span");
-        lineNum.className = "line-num";
-        lineNum.textContent = String(line);
-        lineNum.dataset.originalText = String(line);
-
-        const beforeText = document.createElement("span");
-        beforeText.className = "line-before-text";
-        beforeText.hidden = !edited;
-        beforeText.textContent = edited ? `Before: ${baselineLineText}` : "";
+        const beforeLineEl = document.createElement("div");
+        beforeLineEl.className = "before-line";
+        const beforeTextEl = document.createElement("span");
+        beforeTextEl.className = "before-line-text";
+        beforeTextEl.textContent = edited ? baselineLineText : "";
         if (edited)
         {
-            beforeText.title = `Before: ${baselineLineText}`;
+            beforeTextEl.title = baselineLineText;
         }
+        const resetBtnEl = document.createElement("button");
+        resetBtnEl.type = "button";
+        resetBtnEl.className = "reset-line-btn";
+        resetBtnEl.textContent = "Reset";
+        resetBtnEl.title = "この行を編集前の値に戻します";
+        resetBtnEl.hidden = !edited;
+        resetBtnEl.disabled = !edited;
+        resetBtnEl.addEventListener("click", () => {
+            resetSourceLineToBaseline(line);
+        });
 
-        lineEl.appendChild(lineNum);
-        lineEl.appendChild(beforeText);
+        beforeLineEl.appendChild(beforeTextEl);
+        beforeLineEl.appendChild(resetBtnEl);
+        beforeFragment.appendChild(beforeLineEl);
 
         lineEl.addEventListener("mouseenter", () => {
-            lineNum.textContent = "Jump";
+            lineEl.textContent = "Jump";
+            lineEl.title = "対応する項目へ移動します";
         });
         lineEl.addEventListener("mouseleave", () => {
-            lineNum.textContent = lineNum.dataset.originalText;
+            lineEl.textContent = lineEl.dataset.originalText;
+            lineEl.title = "";
         });
         lineEl.addEventListener("click", () => {
-            scrollEditorToLine(line);
+            const lineRef = sourceLineRefs[lineIndex] ?? { signature: "" };
+            const itemSignature = lineRef.signature;
+
+            let compareRow = findCompareRowBySignature(itemSignature, line);
+            if (!compareRow)
+            {
+                compareRow = compareDiffView.querySelector(`.compare-row[data-left-line=\"${line}\"]`);
+            }
+            highlightCompareRow(compareRow);
+
+            if (itemSignature)
+            {
+                scrollEditorToItemSignature(itemSignature, line);
+            } else
+            {
+                scrollEditorToLine(line);
+            }
         });
         fragment.appendChild(lineEl);
     }
     lineNumbers.replaceChildren(fragment);
+    beforeValues.replaceChildren(beforeFragment);
+    updateEditedLineHighlights();
     syncLineNumberScroll();
     updateCurrentLineHighlight();
 }
 
+function updateEditedLineHighlights() {
+    const currentLines = sourceText.value.split("\n");
+    const baseLines = baselineText.split("\n");
+    const lineCount = Math.max(currentLines.length, baseLines.length, 1);
+    const style = getComputedStyle(sourceText);
+    const lineHeight = parseFloat(style.lineHeight) || 18;
+    const paddingTop = parseFloat(style.paddingTop) || 0;
+    const fragment = document.createDocumentFragment();
+
+    for (let lineIndex = 0; lineIndex < lineCount; lineIndex += 1)
+    {
+        const currentLineText = currentLines[lineIndex] ?? "";
+        const baselineLineText = baseLines[lineIndex] ?? "";
+        if (currentLineText === baselineLineText)
+        {
+            continue;
+        }
+
+        const highlight = document.createElement("div");
+        highlight.className = "edited-line-highlight";
+        highlight.style.top = `${paddingTop + lineIndex * lineHeight}px`;
+        highlight.style.height = `${lineHeight}px`;
+        fragment.appendChild(highlight);
+    }
+
+    editedLinesOverlay.replaceChildren(fragment);
+    syncEditedLinesOverlayScroll();
+}
+
+function syncEditedLinesOverlayScroll() {
+    editedLinesOverlay.style.transform = `translateY(${-sourceText.scrollTop}px)`;
+}
+
 function syncLineNumberScroll() {
     lineNumbers.scrollTop = sourceText.scrollTop;
+    beforeValues.scrollTop = sourceText.scrollTop;
+    syncEditedLinesOverlayScroll();
 }
 
 function getCurrentLineNumberFromCaret() {
@@ -733,6 +1748,37 @@ function scrollEditorToLine(lineNumber) {
     }
 
     const targetField = lastBelowOrEqual || firstAbove || fields[0];
+    targetField.scrollIntoView({ block: "center", behavior: "smooth" });
+
+    clearTimeout(editorJumpHighlightTimer);
+    sectionsRoot.querySelectorAll(".field.jump-focus").forEach((field) => {
+        field.classList.remove("jump-focus");
+    });
+    targetField.classList.add("jump-focus");
+    editorJumpHighlightTimer = setTimeout(() => {
+        targetField.classList.remove("jump-focus");
+    }, 900);
+}
+
+function scrollEditorToItemSignature(itemSignature, anchorLineNumber) {
+    const fields = Array.from(sectionsRoot.querySelectorAll(".field[data-item-signature]"));
+    if (fields.length === 0)
+    {
+        return;
+    }
+
+    const keyFields = fields.filter((field) => field.dataset.itemSignature === itemSignature);
+    const targetField = getClosestByLineDistance(
+        keyFields.length > 0 ? keyFields : fields,
+        anchorLineNumber,
+        (field) => Number(field.dataset.lineNumber || "0")
+    );
+
+    if (!targetField)
+    {
+        return;
+    }
+
     targetField.scrollIntoView({ block: "center", behavior: "smooth" });
 
     clearTimeout(editorJumpHighlightTimer);
@@ -921,6 +1967,7 @@ function renderEditor(parsed) {
             const field = document.createElement("article");
             field.className = "field";
             field.dataset.lineNumber = String(item.lineNumber);
+            field.dataset.itemSignature = buildItemSignature(section.name, item.key);
 
             const top = document.createElement("div");
             top.className = "field-top";
@@ -935,7 +1982,31 @@ function renderEditor(parsed) {
 
             const beforeValue = document.createElement("div");
             beforeValue.className = "field-before";
-            beforeValue.hidden = true;
+            beforeValue.classList.add("inactive");
+            beforeValue.addEventListener("mouseenter", () => {
+                if (!beforeValue.classList.contains("reset-enabled"))
+                {
+                    return;
+                }
+                beforeValue.textContent = "Reset";
+                beforeValue.title = "編集前の値に戻します";
+            });
+            beforeValue.addEventListener("mouseleave", () => {
+                if (!beforeValue.classList.contains("reset-enabled"))
+                {
+                    return;
+                }
+                const beforeLabel = beforeValue.dataset.beforeLabel ?? "";
+                beforeValue.textContent = beforeLabel;
+                beforeValue.title = beforeLabel;
+            });
+            beforeValue.addEventListener("click", () => {
+                if (!beforeValue.classList.contains("reset-enabled"))
+                {
+                    return;
+                }
+                resetEditorItemToBaseline(section.name, item);
+            });
 
             const lineBtn = document.createElement("button");
             lineBtn.type = "button";
@@ -944,9 +2015,11 @@ function renderEditor(parsed) {
             lineBtn.dataset.originalText = `Line ${item.lineNumber}`;
             lineBtn.addEventListener("mouseenter", () => {
                 lineBtn.textContent = "Jump";
+                lineBtn.title = "Current テキストの対応行へ移動します";
             });
             lineBtn.addEventListener("mouseleave", () => {
                 lineBtn.textContent = lineBtn.dataset.originalText;
+                lineBtn.title = "";
             });
             lineBtn.addEventListener("click", () => {
                 scrollSourceToLine(item.lineNumber);
@@ -954,7 +2027,6 @@ function renderEditor(parsed) {
 
             top.appendChild(title);
             top.appendChild(key);
-            top.appendChild(beforeValue);
             top.appendChild(lineBtn);
 
             const desc = document.createElement("p");
@@ -966,7 +2038,18 @@ function renderEditor(parsed) {
             {
                 field.appendChild(desc);
             }
-            field.appendChild(createFieldEditor(section.name, item, field));
+
+            const editorRow = document.createElement("div");
+            editorRow.className = "field-editor-row";
+
+            const editorControl = document.createElement("div");
+            editorControl.className = "field-editor-control";
+            editorControl.appendChild(createFieldEditor(section.name, item, field));
+
+            editorRow.appendChild(editorControl);
+            editorRow.appendChild(beforeValue);
+
+            field.appendChild(editorRow);
 
             updateFieldEditedState(field, section.name, item);
 
@@ -998,6 +2081,7 @@ function importFromText(rawText, options = {}) {
         }
         renderEditor(state);
         updateLineNumbers();
+        renderCompareDiffView();
         setStatus("");
     } catch (error)
     {
@@ -1118,6 +2202,106 @@ loadRepoBtn.addEventListener("click", () => {
     loadRepositoryStyleConf();
 });
 
+compareFileInput.addEventListener("change", async () => {
+    const [file] = compareFileInput.files || [];
+    await loadCompareStyleConf(file);
+});
+
+clearCompareBtn.addEventListener("click", () => {
+    clearCompareStyleConf();
+});
+
+mergeBtn.addEventListener("click", () => {
+    openMergeDialog();
+});
+
+mergeAllTextBtn.addEventListener("click", () => {
+    setAllMergeChoices(true);
+});
+
+mergeAllCompareBtn.addEventListener("click", () => {
+    setAllMergeChoices(false);
+});
+
+mergeCancelBtn.addEventListener("click", () => {
+    mergeDialog.close();
+});
+
+mergeApplyBtn.addEventListener("click", () => {
+    applyMergeSelections();
+});
+
+mergeList.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || target.type !== "checkbox")
+    {
+        return;
+    }
+
+    const mergeIndex = Number(target.dataset.mergeIndex || "-1");
+    if (mergeIndex < 0 || mergeIndex >= mergeCandidates.length)
+    {
+        return;
+    }
+
+    mergeCandidates[mergeIndex].preferText = !target.checked;
+});
+
+compareDiffView.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element) || !target.classList.contains("compare-line-number"))
+    {
+        return;
+    }
+
+    const row = target.closest(".compare-row");
+    if (!row)
+    {
+        return;
+    }
+
+    const itemSignature = row.dataset.itemSignature || "";
+    const leftLine = Number(row.dataset.leftLine || "0");
+    const rightLine = Number(row.dataset.rightLine || "0");
+    let sourceLine = leftLine;
+
+    if (sourceLine <= 0 && itemSignature)
+    {
+        sourceLine = findSourceLineBySignature(itemSignature, rightLine);
+    }
+
+    if (sourceLine > 0)
+    {
+        scrollSourceToLine(sourceLine);
+    }
+
+    if (itemSignature)
+    {
+        const anchor = sourceLine > 0 ? sourceLine : rightLine;
+        scrollEditorToItemSignature(itemSignature, anchor);
+    }
+});
+
+compareDiffView.addEventListener("mouseover", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element) || !target.classList.contains("compare-line-number"))
+    {
+        return;
+    }
+    target.textContent = "Jump";
+    target.title = "Current の対応行へ移動します";
+});
+
+compareDiffView.addEventListener("mouseout", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element) || !target.classList.contains("compare-line-number"))
+    {
+        return;
+    }
+    target.textContent = target.dataset.originalLabel || "";
+    target.title = "";
+});
+
 undoBtn.addEventListener("click", () => {
     performUndo();
 });
@@ -1200,6 +2384,7 @@ document.addEventListener("keydown", (event) => {
 
 sourceText.addEventListener("input", () => {
     updateLineNumbers();
+    renderCompareDiffView();
     scheduleHistoryCommit();
     clearTimeout(textSyncTimer);
     textSyncTimer = setTimeout(() => {
@@ -1251,5 +2436,8 @@ fileInput.addEventListener("change", async () => {
 });
 
 updateLineNumbers();
+renderCompareDiffView();
+initializePaneResizer();
+initializeRightPaneResizer();
 resetHistoryWithCurrentState();
 updateUndoRedoButtons();

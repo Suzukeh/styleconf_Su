@@ -5,7 +5,9 @@ aviutl2の設定ファイル`.conf`のwebエディタ
 
 新しいバージョンのstyle.confに今までの設定をマージするために作りました。
 
-もちろん普通にエディタとしても使えますが、style.conf以外はテストしてないです。
+もちろん普通にエディタとしても使えます。
+
+beta34のstyle.confといつのか分からんぐらい古い自前の`data/style.conf`でマージをテスト済み。
 
 ## 特徴
 style.conf自体に説明が書いてあるので、それを読んで項目を生成するようにしています。
@@ -21,6 +23,8 @@ style.conf自体に説明が書いてあるので、それを読んで項目を�
 <img width="1907" height="897" alt="image" src="https://github.com/user-attachments/assets/e1219c71-50ef-4d1b-8313-d956c973de5b" />
 
 Openでstyle.confを開くと右にエディタが出てきます。
+
+Load Repo style.confを押すと、このリポジトリに入れてあるstyle.confを読み込みます。編集時点でbeta34版です。
 
 **編集前に古いstyle.confをバックアップすることを推奨します** (`style.conf-bak`とかにリネームしておく等)
 

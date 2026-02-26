@@ -25,7 +25,6 @@ Openでstyle.confを開くと右にエディタが出てきます。
 **編集前に古いstyle.confをバックアップすることを推奨します** (`style.conf-bak`とかにリネームしておく等)
 
 - **編集** 左のテキストでも右のエディタでも編集できます。編集すると反対側にも反映されます。
-- **色編集** 色項目はカラーピッカーと透明度（A）を同時に編集できます。透明度100%は6桁HEX、透明度ありは8桁HEXで保存されます。
 - **取り消し** 黄色で編集前の値が表示されています。もとに戻したい場合はResetボタンを押してください。
 - **位置の同期** 行番号をクリックすると反対側にも同じ項目が表示されます。
 - **編集履歴** Undo/Redoだけでなく、履歴一覧から任意の編集点まで戻れます。
@@ -36,11 +35,15 @@ Openでstyle.confを開くと右にエディタが出てきます。
 
 <img width="1912" height="889" alt="image" src="https://github.com/user-attachments/assets/cba45645-e29b-40c9-b590-c93e82813ff1" />
 
-- Openで使用しているaviUtl2.exeと同一階層にあるstyle.confを開く。こっちを`New`と呼ぶ。
-- Open Old style.confからユーザー設定のstyle.conf(`ProgramData\AviUtl2\` or `<aviutl2があるフォルダ>\data\` の中にあるもの) を開く。こっちを`Old`と呼ぶ。
-- Mergeボタンを押して、NewかOldかどちらを残したいかを選択し、ApplyするとNew側に反映されている。
+- Openで使用しているデフォルト設定のstyle.conf(aviUtl2.exeと同じ階層)を開く。こっちを`New`と呼ぶ。
+- Open Old style.confからユーザー設定のstyle.conf(`ProgramData\AviUtl2\` or `<aviutl2があるフォルダ>\data\` の中) を開く。こっちを`Old`と呼ぶ。
+- Mergeボタンを押して、NewかOldかどちらの設定を残したいか選択し、Applyボタンを押すとNew側に反映される。
 
-## 免責事項
+ユーザー設定のstyle.confのバージョンを使用しているもの(最新版)に合わせるのに使えると思います。  その場合はOldを残す(All Oldボタン)形でマージするとうまくいきます。
+
+# 免責事項
 開発者はこのツールによる影響に関して一切の責任を負いません。
+
+**バックアップは必ず実施してください。**
 
 ただし、誠実な対応に向けて善処する方針です。ご連絡は本リポジトリ・Discord・Xなどからお願いします。

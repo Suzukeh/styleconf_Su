@@ -59,6 +59,7 @@ let baselineText = "";
 let baselineValueMap = new Map();
 let colorInputFormat = "hex";
 let colorRowStates = [];
+let colorPickerOutsideCloseInitialized = false;
 let oldText = "";
 let oldFileName = "";
 let newLineRefs = [];
@@ -1566,6 +1567,147 @@ function normalizeHexToken(value) {
     return normalized.toLowerCase();
 }
 
+function compactOpaqueHexToken(token) {
+    const normalized = normalizeHexToken(token);
+    if (!normalized)
+    {
+        return null;
+    }
+    if (normalized.length === 8 && normalized.slice(6, 8) === "ff")
+    {
+        return normalized.slice(0, 6);
+    }
+    return normalized;
+}
+
+function hexTokenFromRgbAndAlpha(rgbHex, alpha) {
+    const normalizedRgb = normalizeHexToken(rgbHex)?.slice(0, 6);
+    if (!normalizedRgb)
+    {
+        return null;
+    }
+    const alphaHex = clampByte(alpha * 255).toString(16).padStart(2, "0");
+    return compactOpaqueHexToken(`${normalizedRgb}${alphaHex}`);
+}
+
+function tokenToIroHex(token) {
+    const normalized = normalizeHexToken(token);
+    if (!normalized)
+    {
+        return null;
+    }
+    if (normalized.length === 6)
+    {
+        return `#${normalized}ff`;
+    }
+    return `#${normalized}`;
+}
+
+function iroColorToHexToken(color) {
+    if (!color || typeof color.hex8String !== "string")
+    {
+        return null;
+    }
+    return compactOpaqueHexToken(color.hex8String.replace(/^#/, ""));
+}
+
+function hexTokenToCssColor(token) {
+    const normalized = normalizeHexToken(token);
+    if (!normalized)
+    {
+        return "transparent";
+    }
+    const red = Number.parseInt(normalized.slice(0, 2), 16);
+    const green = Number.parseInt(normalized.slice(2, 4), 16);
+    const blue = Number.parseInt(normalized.slice(4, 6), 16);
+    const alpha = normalized.length === 8
+        ? Number.parseInt(normalized.slice(6, 8), 16) / 255
+        : 1;
+    return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+function tokenToHslaChannels(token) {
+    const hslText = formatHexToHslText(token);
+    const parts = hslText.split(",").map((part) => part.trim());
+    if (parts.length < 3)
+    {
+        return { h: 0, s: 0, l: 0, a: 1 };
+    }
+
+    const hue = Number(parts[0]);
+    const saturation = Number(parts[1].replace("%", ""));
+    const lightness = Number(parts[2].replace("%", ""));
+    const alpha = parts[3] !== undefined ? Number(parts[3]) : 1;
+
+    return {
+        h: Number.isFinite(hue) ? ((hue % 360) + 360) % 360 : 0,
+        s: Number.isFinite(saturation) ? Math.max(0, Math.min(100, saturation)) : 0,
+        l: Number.isFinite(lightness) ? Math.max(0, Math.min(100, lightness)) : 0,
+        a: Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1
+    };
+}
+
+function hslaChannelsToHexToken(hue, saturation, lightness, alpha, currentToken) {
+    const text = `${hue}, ${saturation}%, ${lightness}%, ${alpha}`;
+    const converted = parseHslTextToHex(text, currentToken);
+    return compactOpaqueHexToken(converted);
+}
+
+function tokenToRgbaChannels(token) {
+    const normalized = normalizeHexToken(token);
+    if (!normalized)
+    {
+        return { r: 0, g: 0, b: 0, a: 1 };
+    }
+
+    const red = Number.parseInt(normalized.slice(0, 2), 16);
+    const green = Number.parseInt(normalized.slice(2, 4), 16);
+    const blue = Number.parseInt(normalized.slice(4, 6), 16);
+    const alpha = normalized.length === 8
+        ? Number.parseInt(normalized.slice(6, 8), 16) / 255
+        : 1;
+
+    return { r: red, g: green, b: blue, a: alpha };
+}
+
+function rgbaChannelsToHexToken(red, green, blue, alpha, currentToken) {
+    const text = `${red}, ${green}, ${blue}, ${alpha}`;
+    const converted = parseRgbTextToHex(text, currentToken);
+    return compactOpaqueHexToken(converted);
+}
+
+function closeAllOpenColorPickers(exceptWrap = null) {
+    sectionsRoot.querySelectorAll(".color-picker-wrap").forEach((wrap) => {
+        if (exceptWrap && wrap === exceptWrap)
+        {
+            return;
+        }
+        const panel = wrap.querySelector(".color-picker-panel");
+        const button = wrap.querySelector(".color-swatch-button");
+        if (!panel || !button)
+        {
+            return;
+        }
+        panel.classList.remove("is-open");
+        button.classList.remove("is-open");
+    });
+}
+
+function ensureColorPickerOutsideCloseHandler() {
+    if (colorPickerOutsideCloseInitialized)
+    {
+        return;
+    }
+    document.addEventListener("pointerdown", (event) => {
+        const target = event.target;
+        const insideWrap = target instanceof Element
+            ? target.closest(".color-picker-wrap")
+            : null;
+        closeAllOpenColorPickers(insideWrap);
+    });
+    colorPickerOutsideCloseInitialized = true;
+}
+
 function clampByte(value) {
     return Math.max(0, Math.min(255, Math.round(value)));
 }
@@ -1750,21 +1892,23 @@ function convertHexTokenToFormat(token, format) {
 }
 
 function convertFormatToHexToken(text, format, currentToken) {
+    let converted = null;
     if (format === "rgb")
     {
-        return parseRgbTextToHex(text, currentToken);
-    }
-    if (format === "hsl")
+        converted = parseRgbTextToHex(text, currentToken);
+    } else if (format === "hsl")
     {
-        return parseHslTextToHex(text, currentToken);
+        converted = parseHslTextToHex(text, currentToken);
+    } else
+    {
+        converted = normalizeHexToken(text);
     }
-    return normalizeHexToken(text);
+    return compactOpaqueHexToken(converted);
 }
 
 function refreshAllColorRows() {
     colorRowStates.forEach((rowState) => {
-        rowState.textInput.value = convertHexTokenToFormat(rowState.token, colorInputFormat);
-        rowState.colorInput.value = `#${rowState.token.slice(0, 6)}`;
+        rowState.refreshInputsFromToken();
     });
 }
 
@@ -2168,6 +2312,8 @@ function scrollNewTextToLine(lineNumber) {
 }
 
 function createColorEditor(sectionName, item, field) {
+    ensureColorPickerOutsideCloseHandler();
+
     const wrapper = document.createElement("div");
     wrapper.className = "color-list";
 
@@ -2241,39 +2387,368 @@ function createColorEditor(sectionName, item, field) {
         const row = document.createElement("div");
         row.className = "color-item";
 
-        const colorInput = document.createElement("input");
-        colorInput.type = "color";
+        const pickerWrap = document.createElement("div");
+        pickerWrap.className = "color-picker-wrap";
+
+        const swatchButton = document.createElement("button");
+        swatchButton.type = "button";
+        swatchButton.className = "color-swatch-button";
+        swatchButton.title = "クリックしてカラーピッカーを開く";
+
+        const pickerPanel = document.createElement("div");
+        pickerPanel.className = "color-picker-panel";
+
+        const modeSwitch = document.createElement("div");
+        modeSwitch.className = "color-picker-mode-switch";
+
+        const pickerModeBtn = document.createElement("button");
+        pickerModeBtn.type = "button";
+        pickerModeBtn.className = "color-picker-mode-btn is-active";
+        pickerModeBtn.textContent = "Picker";
+
+        const hslModeBtn = document.createElement("button");
+        hslModeBtn.type = "button";
+        hslModeBtn.className = "color-picker-mode-btn";
+        hslModeBtn.textContent = "HSL";
+
+        const rgbModeBtn = document.createElement("button");
+        rgbModeBtn.type = "button";
+        rgbModeBtn.className = "color-picker-mode-btn";
+        rgbModeBtn.textContent = "RGB";
+
+        modeSwitch.appendChild(pickerModeBtn);
+        modeSwitch.appendChild(hslModeBtn);
+        modeSwitch.appendChild(rgbModeBtn);
+        pickerPanel.appendChild(modeSwitch);
+
+        const pickerHost = document.createElement("div");
+        pickerHost.className = "color-picker-host";
+        pickerPanel.appendChild(pickerHost);
+
+        const createModelEditor = (className, fields) => {
+            const editor = document.createElement("div");
+            editor.className = className;
+
+            const preview = document.createElement("div");
+            preview.className = "color-model-preview";
+            editor.appendChild(preview);
+
+            const map = {};
+            fields.forEach((fieldDef) => {
+                const wrap = document.createElement("label");
+                wrap.className = "color-channel-field";
+
+                const labelEl = document.createElement("span");
+                labelEl.className = "color-channel-label";
+                labelEl.textContent = fieldDef.label;
+
+                const rangeEl = document.createElement("input");
+                rangeEl.type = "range";
+                rangeEl.className = "color-channel-range";
+                rangeEl.min = String(fieldDef.min);
+                rangeEl.max = String(fieldDef.max);
+                rangeEl.step = String(fieldDef.step);
+
+                const numberEl = document.createElement("input");
+                numberEl.type = "number";
+                numberEl.className = "color-channel-number";
+                numberEl.min = String(fieldDef.min);
+                numberEl.max = String(fieldDef.max);
+                numberEl.step = String(fieldDef.step);
+
+                wrap.appendChild(labelEl);
+                wrap.appendChild(rangeEl);
+                wrap.appendChild(numberEl);
+                editor.appendChild(wrap);
+
+                map[fieldDef.key] = {
+                    range: rangeEl,
+                    number: numberEl
+                };
+            });
+
+            return { editor, map, preview };
+        };
+
+        const hslModel = createModelEditor("color-model-editor color-hsl-editor", [
+            { key: "h", label: "H", min: 0, max: 360, step: 1 },
+            { key: "s", label: "S", min: 0, max: 100, step: 1 },
+            { key: "l", label: "L", min: 0, max: 100, step: 1 },
+            { key: "a", label: "A", min: 0, max: 1, step: 0.01 }
+        ]);
+
+        const rgbModel = createModelEditor("color-model-editor color-rgb-editor", [
+            { key: "r", label: "R", min: 0, max: 255, step: 1 },
+            { key: "g", label: "G", min: 0, max: 255, step: 1 },
+            { key: "b", label: "B", min: 0, max: 255, step: 1 },
+            { key: "a", label: "A", min: 0, max: 1, step: 0.01 }
+        ]);
+
+        pickerPanel.appendChild(hslModel.editor);
+        pickerPanel.appendChild(rgbModel.editor);
+        pickerWrap.appendChild(swatchButton);
+        pickerWrap.appendChild(pickerPanel);
 
         const textInput = document.createElement("input");
         textInput.type = "text";
 
         const rowState = {
             token: normalizedToken,
-            colorInput,
-            textInput
+            textInput,
+            picker: null,
+            syncingPicker: false,
+            syncingHsl: false,
+            syncingRgb: false,
+            refreshInputsFromToken: () => { }
         };
         rowStates.push(rowState);
         colorRowStates.push(rowState);
 
+        const clampByInput = (inputEl, value) => {
+            const min = Number(inputEl.min);
+            const max = Number(inputEl.max);
+            let next = value;
+            if (Number.isFinite(min))
+            {
+                next = Math.max(min, next);
+            }
+            if (Number.isFinite(max))
+            {
+                next = Math.min(max, next);
+            }
+            return next;
+        };
+
+        const getChannelValue = (channel) => {
+            const value = Number(channel.number.value);
+            if (!Number.isFinite(value))
+            {
+                return null;
+            }
+            return clampByInput(channel.number, value);
+        };
+
+        const setChannelValue = (channel, value, digits = 0) => {
+            const clamped = clampByInput(channel.number, value);
+            const normalized = digits > 0 ? Number(clamped.toFixed(digits)) : Math.round(clamped);
+            channel.range.value = String(normalized);
+            channel.number.value = String(normalized);
+        };
+
+        const updateChannelSliderBackgrounds = () => {
+            const rgba = tokenToRgbaChannels(rowState.token);
+            const hsla = tokenToHslaChannels(rowState.token);
+
+            hslModel.map.h.range.style.background = "linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)";
+            hslModel.map.s.range.style.background = `linear-gradient(to right, hsla(${hsla.h}, 0%, ${hsla.l}%, ${hsla.a}), hsla(${hsla.h}, 100%, ${hsla.l}%, ${hsla.a}))`;
+            hslModel.map.l.range.style.background = `linear-gradient(to right, hsla(${hsla.h}, ${hsla.s}%, 0%, ${hsla.a}), hsla(${hsla.h}, ${hsla.s}%, 50%, ${hsla.a}), hsla(${hsla.h}, ${hsla.s}%, 100%, ${hsla.a}))`;
+            hslModel.map.a.range.style.background = `linear-gradient(to right, rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, 0), rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, 1))`;
+
+            rgbModel.map.r.range.style.background = `linear-gradient(to right, rgba(0, ${rgba.g}, ${rgba.b}, ${rgba.a}), rgba(255, ${rgba.g}, ${rgba.b}, ${rgba.a}))`;
+            rgbModel.map.g.range.style.background = `linear-gradient(to right, rgba(${rgba.r}, 0, ${rgba.b}, ${rgba.a}), rgba(${rgba.r}, 255, ${rgba.b}, ${rgba.a}))`;
+            rgbModel.map.b.range.style.background = `linear-gradient(to right, rgba(${rgba.r}, ${rgba.g}, 0, ${rgba.a}), rgba(${rgba.r}, ${rgba.g}, 255, ${rgba.a}))`;
+            rgbModel.map.a.range.style.background = `linear-gradient(to right, rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, 0), rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, 1))`;
+
+            const previewColor = hexTokenToCssColor(rowState.token);
+            hslModel.preview.style.background = previewColor;
+            rgbModel.preview.style.background = previewColor;
+        };
+
         const refreshInputsFromToken = () => {
             textInput.value = convertHexTokenToFormat(rowState.token, colorInputFormat);
-            colorInput.value = `#${rowState.token.slice(0, 6)}`;
+            const swatchColor = hexTokenToCssColor(rowState.token);
+            swatchButton.style.setProperty("--swatch-color", swatchColor);
+            swatchButton.style.background = "";
+
+            rowState.syncingHsl = true;
+            const hsla = tokenToHslaChannels(rowState.token);
+            setChannelValue(hslModel.map.h, hsla.h);
+            setChannelValue(hslModel.map.s, hsla.s);
+            setChannelValue(hslModel.map.l, hsla.l);
+            setChannelValue(hslModel.map.a, hsla.a, 2);
+            rowState.syncingHsl = false;
+
+            rowState.syncingRgb = true;
+            const rgba = tokenToRgbaChannels(rowState.token);
+            setChannelValue(rgbModel.map.r, rgba.r);
+            setChannelValue(rgbModel.map.g, rgba.g);
+            setChannelValue(rgbModel.map.b, rgba.b);
+            setChannelValue(rgbModel.map.a, rgba.a, 2);
+            rowState.syncingRgb = false;
+
+            updateChannelSliderBackgrounds();
+
+            const pickerToken = tokenToIroHex(rowState.token);
+            if (!rowState.picker || !pickerToken)
+            {
+                return;
+            }
+            const currentPickerToken = (rowState.picker.color?.hex8String || "").toLowerCase();
+            if (currentPickerToken === pickerToken)
+            {
+                return;
+            }
+            rowState.syncingPicker = true;
+            rowState.picker.color.set(pickerToken);
+            rowState.syncingPicker = false;
         };
+
+        rowState.refreshInputsFromToken = refreshInputsFromToken;
 
         refreshInputsFromToken();
 
-        colorInput.addEventListener("input", () => {
-            const alphaHex = rowState.token.length === 8 ? rowState.token.slice(6, 8) : "";
-            rowState.token = `${colorInput.value.slice(1)}${alphaHex}`.toLowerCase();
+        swatchButton.addEventListener("click", () => {
+            const isOpen = pickerPanel.classList.toggle("is-open");
+            swatchButton.classList.toggle("is-open", isOpen);
+        });
+
+        const setPickerMode = (mode) => {
+            const isHsl = mode === "hsl";
+            const isRgb = mode === "rgb";
+            pickerHost.classList.toggle("is-hidden", isHsl || isRgb);
+            hslModel.editor.classList.toggle("is-visible", isHsl);
+            rgbModel.editor.classList.toggle("is-visible", isRgb);
+            pickerModeBtn.classList.toggle("is-active", mode === "picker");
+            hslModeBtn.classList.toggle("is-active", isHsl);
+            rgbModeBtn.classList.toggle("is-active", isRgb);
+        };
+
+        pickerModeBtn.addEventListener("click", () => {
+            setPickerMode("picker");
+        });
+        hslModeBtn.addEventListener("click", () => {
+            setPickerMode("hsl");
+        });
+        rgbModeBtn.addEventListener("click", () => {
+            setPickerMode("rgb");
+        });
+        setPickerMode("picker");
+
+        const updateTokenFromHslInputs = () => {
+            if (rowState.syncingHsl)
+            {
+                return;
+            }
+
+            const hue = getChannelValue(hslModel.map.h);
+            const saturation = getChannelValue(hslModel.map.s);
+            const lightness = getChannelValue(hslModel.map.l);
+            const alpha = getChannelValue(hslModel.map.a);
+            if ([hue, saturation, lightness, alpha].some((value) => value === null))
+            {
+                return;
+            }
+
+            const nextToken = hslaChannelsToHexToken(hue, saturation, lightness, alpha, rowState.token);
+            if (!nextToken || nextToken === rowState.token)
+            {
+                return;
+            }
+            rowState.token = nextToken;
             refreshInputsFromToken();
             syncItemValue();
-        });
-        colorInput.addEventListener("change", () => {
-            flushColorHistoryCommit();
-        });
-        colorInput.addEventListener("blur", () => {
-            flushColorHistoryCommit();
-        });
+        };
+
+        const updateTokenFromRgbInputs = () => {
+            if (rowState.syncingRgb)
+            {
+                return;
+            }
+
+            const red = getChannelValue(rgbModel.map.r);
+            const green = getChannelValue(rgbModel.map.g);
+            const blue = getChannelValue(rgbModel.map.b);
+            const alpha = getChannelValue(rgbModel.map.a);
+            if ([red, green, blue, alpha].some((value) => value === null))
+            {
+                return;
+            }
+
+            const nextToken = rgbaChannelsToHexToken(red, green, blue, alpha, rowState.token);
+            if (!nextToken || nextToken === rowState.token)
+            {
+                return;
+            }
+            rowState.token = nextToken;
+            refreshInputsFromToken();
+            syncItemValue();
+        };
+
+        const bindChannelEvents = (channelMap, onInput) => {
+            Object.values(channelMap).forEach((channel) => {
+                channel.range.addEventListener("input", () => {
+                    channel.number.value = channel.range.value;
+                    onInput();
+                });
+                channel.number.addEventListener("input", () => {
+                    const value = Number(channel.number.value);
+                    if (!Number.isFinite(value))
+                    {
+                        return;
+                    }
+                    channel.range.value = String(clampByInput(channel.number, value));
+                    onInput();
+                });
+                channel.range.addEventListener("change", () => {
+                    onInput();
+                    flushColorHistoryCommit();
+                });
+                channel.number.addEventListener("change", () => {
+                    onInput();
+                    flushColorHistoryCommit();
+                });
+                channel.range.addEventListener("blur", () => {
+                    flushColorHistoryCommit();
+                });
+                channel.number.addEventListener("blur", () => {
+                    flushColorHistoryCommit();
+                });
+            });
+        };
+
+        bindChannelEvents(hslModel.map, updateTokenFromHslInputs);
+        bindChannelEvents(rgbModel.map, updateTokenFromRgbInputs);
+
+        if (typeof window.iro === "undefined")
+        {
+            const notAvailable = document.createElement("div");
+            notAvailable.className = "field-desc";
+            notAvailable.textContent = "Color picker library not loaded";
+            pickerHost.appendChild(notAvailable);
+        } else
+        {
+            const initialColor = tokenToIroHex(rowState.token) || "#ffffff";
+            rowState.picker = new window.iro.ColorPicker(pickerHost, {
+                width: 190,
+                color: initialColor,
+                borderWidth: 1,
+                borderColor: "#666",
+                layout: [
+                    { component: window.iro.ui.Box },
+                    { component: window.iro.ui.Slider, options: { sliderType: "hue" } },
+                    { component: window.iro.ui.Slider, options: { sliderType: "alpha" } }
+                ]
+            });
+
+            rowState.picker.on("color:change", (color) => {
+                if (rowState.syncingPicker)
+                {
+                    return;
+                }
+                const convertedToken = iroColorToHexToken(color);
+                if (!convertedToken || convertedToken === rowState.token)
+                {
+                    return;
+                }
+                rowState.token = convertedToken;
+                refreshInputsFromToken();
+                syncItemValue();
+            });
+
+            rowState.picker.on("input:end", () => {
+                flushColorHistoryCommit();
+            });
+        }
 
         textInput.addEventListener("input", () => {
             const converted = convertFormatToHexToken(textInput.value.trim(), colorInputFormat, rowState.token);
@@ -2292,7 +2767,7 @@ function createColorEditor(sectionName, item, field) {
             flushColorHistoryCommit();
         });
 
-        row.appendChild(colorInput);
+        row.appendChild(pickerWrap);
         row.appendChild(textInput);
         wrapper.appendChild(row);
     });

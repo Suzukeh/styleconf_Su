@@ -34,6 +34,7 @@ Openでstyle.confを開くと右にエディタが出てきます。
 ## 設定のマージ
 
 <img width="1912" height="889" alt="image" src="https://github.com/user-attachments/assets/cba45645-e29b-40c9-b590-c93e82813ff1" />
+<img width="737" height="759" alt="image" src="https://github.com/user-attachments/assets/2dc2e12b-5968-4b53-a734-b4ed3b93be2f" />
 
 - Openで使用しているデフォルト設定のstyle.conf(aviUtl2.exeと同じ階層)を開く。こっちを`New`と呼ぶ。
 - Open Old style.confからユーザー設定のstyle.conf(`ProgramData\AviUtl2\` or `<aviutl2があるフォルダ>\data\` の中) を開く。こっちを`Old`と呼ぶ。
